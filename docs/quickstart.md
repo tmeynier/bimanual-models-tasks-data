@@ -1,0 +1,304 @@
+# Hepha simulation-to-policy quickstart
+
+Hepha is an external LeRobot robot plugin with pluggable simulation backends.
+The installed official LeRobot package owns dataset serialization, every policy,
+training, preprocessing, checkpoints, and policy rollout. Hepha supplies only the
+simulation adapters, demonstration controllers, and thin workflow launchers.
+
+## Install
+
+Python 3.12 is required by LeRobot 0.6.1.
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e '.[dev]'
+```
+
+On macOS, MuJoCo's native viewer needs the `mjpython` launcher. The `hepha-view`
+command switches to it automatically when it is available.
+
+## Discover installed functionality
+
+```bash
+.venv/bin/hepha-view --list-backends
+.venv/bin/hepha-record --backend mujoco --list-controllers
+.venv/bin/hepha-policies
+```
+
+The policy list is obtained from LeRobot's live `PreTrainedConfig` registry, so it
+tracks the installed LeRobot version and any installed `lerobot_policy_*` plugins.
+
+## 1. View and control the robot
+
+```bash
+.venv/bin/hepha-view --backend mujoco
+```
+
+Use MuJoCo's native **Control** panel to move every actuator across its configured
+control interval. Hepha does not override the panel's actuator targets.
+
+Collision geometry, the head-camera axes, and the live cube-center coordinate
+frame are hidden by default. Enable them with either boolean form:
+
+```bash
+.venv/bin/hepha-view --backend mujoco --debug
+.venv/bin/hepha-view --backend mujoco --debug true
+```
+
+The cube frame remains attached to the cube as it moves. Other task-specific IK
+frames appear when their targets are available.
+
+## 2. Record an IK-generated LeRobot dataset
+
+```bash
+.venv/bin/hepha-record \
+  --backend mujoco \
+  --controller ik \
+  --repo-id hepha/simulation_ik \
+  --root datasets/hepha_simulation_ik \
+  --episodes 20 \
+  --episode-seconds 360 \
+  --viewer true \
+  --debug true \
+  --cube-grasp-lock true \
+  --cube-drop-assist true
+```
+
+Each frame contains `observation.state`, `observation.images.head_camera`,
+`observation.environment_state`, `action`, and a task string in LeRobotDataset v3
+format. The environment state stores the requested-drawer one-hot vector and the
+five-way task phase. Observations and actions contain the 12 arm and finger joint
+positions.
+
+The demonstrations open the selected drawer, pick the cube, place it in the drawer,
+close the drawer, and return the arms to their initial pose. Position-and-orientation
+IK controls only the arm joints. The hand closest to the requested drawer opens it
+first, then the hand closest to the cube grasps and lifts the cube.
+The current checked-in MuJoCo description still has the legacy movable support
+geometry. Until that description and the surrounding task layout are replaced,
+the complete fixed-base sequence is not expected to pass its reachability and
+task-success checks.
+If those are different hands, the cube is passed physically to the drawer-side
+hand before insertion. Center drawers 2, 5, and 8 are reachable by either arm, so
+the cube-holding arm places the cube directly and no handoff is scheduled. The
+episode starts from the user-selected mirrored working
+pose. A normalized joint-space penalty (weight 300) keeps each IK result near that
+fixed posture, a smaller continuity penalty (weight 30) discourages sudden IK-branch
+changes, and every optimized arm joint is constrained to within 75 degrees of its
+nominal value. Cartesian position and orientation remain the primary objectives.
+Drawer-opening targets rotate the finger gap by -90 degrees on the left or
++90 degrees on the right so it is perpendicular to the horizontal handle. Cube
+pickup uses a stronger orientation weight of 50 to keep the fingers approximately
+parallel to the floor. IK waypoints are connected by smooth joint-space motions.
+Cube grasping uses a 32 mm finger
+gap, a short settling hold, and moderate compliant cube/fingertip contacts to
+approximate a foam cube between plastic fingers. By default, handoff, transport,
+and release remain physical and use no artificial grasp constraint. The optional
+`--cube-grasp-lock true` mode captures the live hand-to-cube transform after a
+successful close approach, holds that transform during transport, transfers it to
+the receiver only after handoff contact is verified, and disables it before the
+drawer drop. It therefore abstracts retention and simulated slipping without
+turning a missed approach into a successful grasp. During handoff, the receiver
+uses the cube-side pair perpendicular to the pair indicated by the donor hand's red
+axis. It keeps its fingers fully open through both approach IKs and closes only after
+reaching the cube center. Immediately before dropping the cube into the drawer,
+cube/gripper friction is set to zero so the cube releases cleanly; normal collision
+remains enabled, and grasp friction is restored on episode reset. The drawer-drop
+assist is enabled by default: during the short release-settling phase it constrains
+the cube center to the drawer's geometrically safe horizontal interior, removes
+lateral and angular velocity, maintains a gentle descent until the cube approaches
+the drawer floor, and then cancels upward rebound while leaving gravity and contact
+to finish the landing. Pass `--cube-drop-assist false` for fully physical drop
+dynamics. Failed or timed-out attempts are discarded.
+Pass `--early-failures false` to turn task-quality aborts into warnings and watch
+the complete sequence during debugging. The attempt timeout and final success
+validation remain active, so invalid episodes are never silently saved.
+`--episode-seconds` is an attempt timeout rather than a fixed episode length. Video
+storage is enabled by default; add `--no-video` for a fast PNG-based debug run. By
+default the recorder makes up to three attempts per requested successful episode;
+use `--max-attempts` to change that limit. `--viewer` and `--viewer true` both
+open MuJoCo's native viewer so the physical demonstration can be watched while
+it is recorded; use `--viewer false` for headless recording. With `--debug true`,
+the viewer also shows collision geometry, the head-camera axes, and the four IK
+target frames. Each IK directly uses its displayed frame for both position and
+orientation. The drawer-opening and drawer-closing frames overlap at the selected
+handle center and follow the handle while the drawer moves. The cube-grasp and
+cube-placement frames remain fixed for the episode.
+The cube-center frame remains visible in the native viewer throughout a debug
+episode. Debug geometry is never included in the recorded camera observation.
+
+Evaluate the IK controller without recording a dataset:
+
+```bash
+.venv/bin/python -m hepha_lerobot.evaluation.ik_sweep \
+  --episodes 10 \
+  --episode-seconds 360 \
+  --viewer true \
+  --debug true \
+  --early-failures false \
+  --cube-grasp-lock true \
+  --cube-drop-assist true
+```
+
+This runs exactly ten attempts and never retries merely to reach a requested
+number of successes. Task-quality early failures become warnings; a failed
+attempt is reported and the next seed starts automatically. The summary gives
+cumulative rates for opening the drawer, grasping the cube, completing a
+physical handoff when required, putting the cube in the selected drawer, and
+closing it after insertion. Final closed-loop success requires the cube to
+remain inside the selected drawer while that drawer is closed.
+
+Inspect an episode with LeRobot's own visualizer:
+
+```bash
+.venv/bin/lerobot-dataset-viz \
+  --repo-id hepha/simulation_ik \
+  --root datasets/hepha_simulation_ik \
+  --mode local \
+  --episode-index 0
+```
+
+## 3. Train any LeRobot policy
+
+Apple Silicon:
+
+```bash
+.venv/bin/hepha-train \
+  --policy-type act \
+  --repo-id hepha/simulation_ik \
+  --root datasets/hepha_simulation_ik \
+  --output-dir outputs/act \
+  --device mps \
+  --steps 100000
+```
+
+Use `--policy-type diffusion`, `smolvla`, or any value printed by
+`hepha-policies`. Arguments after `--` are passed unchanged to `lerobot-train`,
+which keeps policy-specific configuration available without adding policy logic
+to Hepha:
+
+```bash
+.venv/bin/hepha-train \
+  --policy-type diffusion \
+  --repo-id hepha/simulation_ik \
+  --root datasets/hepha_simulation_ik \
+  -- --policy.n_action_steps=8
+```
+
+No model, normalizer, optimizer, checkpoint, or dataloader is reimplemented.
+`--device auto` uses LeRobot's own device selection; add `--num-workers 0` for a
+small smoke test. Policy-specific extras or pretrained models may still be
+required by LeRobot.
+
+## 4. Evaluate the policy in MuJoCo
+
+```bash
+.venv/bin/hepha-evaluate \
+  outputs/act/checkpoints/last/pretrained_model \
+  --backend mujoco \
+  --device mps \
+  --duration 30
+```
+
+This delegates policy execution to LeRobot's `lerobot-rollout` base strategy and
+loads `--robot.type=hepha_simulation` through LeRobot's third-party plugin
+discovery. The `--backend` value is independent of the trained policy.
+Add `--headless` on a server.
+
+The equivalent direct command is:
+
+```bash
+.venv/bin/lerobot-rollout \
+  --strategy.type=base \
+  --policy.path=outputs/act/checkpoints/last/pretrained_model \
+  --robot.type=hepha_simulation \
+  --robot.backend=mujoco \
+  --robot.viewer=true \
+  --duration=30
+```
+
+## 5. Collect DAgger corrections
+
+First watch policy rollouts. Press Space at a state where a human correction
+should begin. The current MuJoCo integration state and task metadata are saved,
+and that rollout stops. Press N to skip a good episode without saving it, or Q
+to finish. Closing the viewer also ends the command.
+
+```bash
+.venv/bin/hepha-dagger-mark models/hepha_act_phase_200 \
+  --output-dir dagger/hepha_act_phase_200 \
+  --episodes 20 \
+  --episode-seconds 100 \
+  --seed-start 20000 \
+  --device mps \
+  --n-action-steps 1 \
+  --temporal-ensemble-coeff 0.01 \
+  --domain-randomization-scale 0
+```
+
+Then restore each saved state. Use MuJoCo's native Control panel to command the
+actuator targets, press 1–5 when the semantic phase changes, and press Space
+when the short human correction is complete.
+The joint targets are sampled at 30 Hz and Savitzky-Golay smoothed without
+changing the frame count. Hepha then restores the marked state and records a
+physics-consistent replay of the smoothed correction. A correction is discarded
+if Space is not pressed.
+
+```bash
+.venv/bin/hepha-dagger-correct dagger/hepha_act_phase_200 \
+  --repo-id tmeynier/hepha_dagger_corrections \
+  --root datasets/hepha_dagger_corrections \
+  --dataset-schema phase \
+  --max-seconds 30 \
+  --push-to-hub \
+  --overwrite
+```
+
+During correction collection, Space saves, N discards and advances, R discards
+the current attempt and restores the same marked state for another try, and Q
+finishes gracefully. Every accepted correction is finalized first as an
+independent dataset shard. If the command is interrupted, run the same command
+again with `--resume` instead of `--overwrite`; already completed marked states
+are skipped and the final dataset is rebuilt from all durable shards.
+
+Use `--dataset-schema drawer` instead when extending an original ACT dataset
+that has the drawer one-hot condition but no task-phase input or target. Finally,
+merge corrections through LeRobot's native dataset aggregation and optionally
+publish the result:
+
+```bash
+.venv/bin/hepha-dagger-merge \
+  --base-repo-id tmeynier/hepha_mujoco_ik_phase_200 \
+  --base-root datasets/hepha_mujoco_ik_phase_200 \
+  --correction-repo-id tmeynier/hepha_dagger_corrections \
+  --correction-root datasets/hepha_dagger_corrections \
+  --repo-id tmeynier/hepha_mujoco_ik_phase_200_dagger \
+  --root datasets/hepha_mujoco_ik_phase_200_dagger \
+  --push-to-hub \
+  --overwrite
+```
+
+## Project boundaries and extension points
+
+```text
+lerobot/                    Dataset, policy, recording, training, and rollout integration
+lerobot/hepha_simulation.py Discoverable backend-neutral LeRobot Robot adapter
+simulation/                 Backend contract, registry, and generic viewer
+simulation/backends/mujoco MuJoCo implementation, MJCF, meshes, and IK
+scripts/                    Generic convenience wrappers only
+cad/                        Source CAD (intentionally untouched)
+```
+
+An Isaac Sim implementation subclasses `SimulationBackend` and can be exposed as
+an entry point in the `hepha.simulation_backends` group. A controller can be
+added through `hepha.demonstration_controllers` using the name
+`isaac_sim.<controller>`. Recording, training, and evaluation then need only
+`--backend isaac_sim`; their policy and dataset code does not change.
+
+The plugin follows LeRobot's official
+[custom hardware conventions](https://github.com/huggingface/lerobot/blob/main/docs/source/integrate_hardware.mdx).
+ACT usage follows the official
+[ACT guide](https://github.com/huggingface/lerobot/blob/main/docs/source/act.mdx),
+and deployment uses the official
+[rollout interface](https://github.com/huggingface/lerobot/blob/main/docs/source/inference.mdx).

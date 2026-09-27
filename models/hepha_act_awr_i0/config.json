@@ -1,0 +1,80 @@
+{
+    "type": "hepha_act_awr",
+    "n_obs_steps": 1,
+    "input_features": {
+        "observation.state": {
+            "type": "STATE",
+            "shape": [
+                15
+            ]
+        },
+        "observation.images.head_camera": {
+            "type": "VISUAL",
+            "shape": [
+                3,
+                256,
+                256
+            ]
+        },
+        "observation.environment_state": {
+            "type": "ENV",
+            "shape": [
+                9
+            ]
+        }
+    },
+    "output_features": {
+        "action": {
+            "type": "ACTION",
+            "shape": [
+                15
+            ]
+        }
+    },
+    "device": "cuda",
+    "use_amp": false,
+    "use_peft": false,
+    "push_to_hub": true,
+    "repo_id": "tmeynier/hepha_act_awr_i0",
+    "private": null,
+    "tags": null,
+    "license": null,
+    "pretrained_path": "models/hepha_act_awr_value_i0",
+    "pretrained_revision": null,
+    "chunk_size": 100,
+    "n_action_steps": 10,
+    "normalization_mapping": {
+        "VISUAL": "MEAN_STD",
+        "STATE": "MEAN_STD",
+        "ACTION": "MEAN_STD"
+    },
+    "vision_backbone": "resnet18",
+    "pretrained_backbone_weights": "ResNet18_Weights.IMAGENET1K_V1",
+    "replace_final_stride_with_dilation": 0,
+    "pre_norm": false,
+    "dim_model": 512,
+    "n_heads": 8,
+    "dim_feedforward": 3200,
+    "feedforward_activation": "relu",
+    "n_encoder_layers": 4,
+    "n_decoder_layers": 1,
+    "use_vae": true,
+    "latent_dim": 32,
+    "n_vae_encoder_layers": 4,
+    "temporal_ensemble_coeff": null,
+    "dropout": 0.1,
+    "kl_weight": 10.0,
+    "optimizer_lr": 1e-05,
+    "optimizer_weight_decay": 0.0001,
+    "optimizer_lr_backbone": 1e-05,
+    "awr_stage": "actor",
+    "awr_advantage_path": "awr/iteration-000/advantages.parquet",
+    "awr_discount": 0.999,
+    "awr_beta": 1.0,
+    "awr_max_weight": 20.0,
+    "awr_normalize_advantage": true,
+    "value_hidden_dim": 256,
+    "value_head_dropout": 0.1,
+    "value_optimizer_lr": 0.0001,
+    "value_optimizer_weight_decay": 0.0001
+}

@@ -1,0 +1,229 @@
+{
+    "dataset": {
+        "repo_id": "tmeynier/hepha_act_awr_rollouts",
+        "repo_type": "dataset",
+        "root": "datasets/hepha_act_awr_rollouts",
+        "episodes": null,
+        "image_transforms": {
+            "enable": false,
+            "max_num_transforms": 3,
+            "random_order": false,
+            "tfs": {
+                "brightness": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "brightness": [
+                            0.8,
+                            1.2
+                        ]
+                    }
+                },
+                "contrast": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "contrast": [
+                            0.8,
+                            1.2
+                        ]
+                    }
+                },
+                "saturation": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "saturation": [
+                            0.5,
+                            1.5
+                        ]
+                    }
+                },
+                "hue": {
+                    "weight": 1.0,
+                    "type": "ColorJitter",
+                    "kwargs": {
+                        "hue": [
+                            -0.05,
+                            0.05
+                        ]
+                    }
+                },
+                "sharpness": {
+                    "weight": 1.0,
+                    "type": "SharpnessJitter",
+                    "kwargs": {
+                        "sharpness": [
+                            0.5,
+                            1.5
+                        ]
+                    }
+                },
+                "affine": {
+                    "weight": 1.0,
+                    "type": "RandomAffine",
+                    "kwargs": {
+                        "degrees": [
+                            -5.0,
+                            5.0
+                        ],
+                        "translate": [
+                            0.05,
+                            0.05
+                        ]
+                    }
+                }
+            }
+        },
+        "revision": null,
+        "use_imagenet_stats": true,
+        "video_backend": "torchcodec",
+        "return_uint8": false,
+        "depth_output_unit": "mm",
+        "streaming": false,
+        "eval_split": 0.1
+    },
+    "env": null,
+    "policy": {
+        "type": "hepha_act_awr",
+        "n_obs_steps": 1,
+        "input_features": {
+            "observation.state": {
+                "type": "STATE",
+                "shape": [
+                    15
+                ]
+            },
+            "observation.images.head_camera": {
+                "type": "VISUAL",
+                "shape": [
+                    3,
+                    256,
+                    256
+                ]
+            },
+            "observation.environment_state": {
+                "type": "ENV",
+                "shape": [
+                    9
+                ]
+            }
+        },
+        "output_features": {
+            "action": {
+                "type": "ACTION",
+                "shape": [
+                    15
+                ]
+            }
+        },
+        "device": "cuda",
+        "use_amp": false,
+        "use_peft": false,
+        "push_to_hub": true,
+        "repo_id": "tmeynier/hepha_act_awr_i0",
+        "private": null,
+        "tags": null,
+        "license": null,
+        "pretrained_path": "models/hepha_act_awr_value_i0",
+        "pretrained_revision": null,
+        "chunk_size": 100,
+        "n_action_steps": 10,
+        "normalization_mapping": {
+            "VISUAL": "MEAN_STD",
+            "STATE": "MEAN_STD",
+            "ACTION": "MEAN_STD"
+        },
+        "vision_backbone": "resnet18",
+        "pretrained_backbone_weights": "ResNet18_Weights.IMAGENET1K_V1",
+        "replace_final_stride_with_dilation": 0,
+        "pre_norm": false,
+        "dim_model": 512,
+        "n_heads": 8,
+        "dim_feedforward": 3200,
+        "feedforward_activation": "relu",
+        "n_encoder_layers": 4,
+        "n_decoder_layers": 1,
+        "use_vae": true,
+        "latent_dim": 32,
+        "n_vae_encoder_layers": 4,
+        "temporal_ensemble_coeff": null,
+        "dropout": 0.1,
+        "kl_weight": 10.0,
+        "optimizer_lr": 1e-05,
+        "optimizer_weight_decay": 0.0001,
+        "optimizer_lr_backbone": 1e-05,
+        "awr_stage": "actor",
+        "awr_advantage_path": "awr/iteration-000/advantages.parquet",
+        "awr_discount": 0.999,
+        "awr_beta": 1.0,
+        "awr_max_weight": 20.0,
+        "awr_normalize_advantage": true,
+        "value_hidden_dim": 256,
+        "value_head_dropout": 0.1,
+        "value_optimizer_lr": 0.0001,
+        "value_optimizer_weight_decay": 0.0001
+    },
+    "reward_model": null,
+    "output_dir": "outputs/hepha_act_awr_actor_i0",
+    "job_name": "hepha_act_awr_actor_i0",
+    "resume": false,
+    "seed": 1000,
+    "cudnn_deterministic": false,
+    "num_workers": 4,
+    "batch_size": 8,
+    "prefetch_factor": 4,
+    "persistent_workers": true,
+    "dataloader_multiprocessing_context": "spawn",
+    "steps": 100000,
+    "env_eval_freq": 20000,
+    "log_freq": 200,
+    "eval_steps": 10000,
+    "max_eval_samples": 0,
+    "tolerance_s": 0.0001,
+    "save_checkpoint": true,
+    "save_freq": 10000,
+    "use_policy_training_preset": true,
+    "optimizer": {
+        "type": "adamw",
+        "lr": 1e-05,
+        "weight_decay": 0.0001,
+        "grad_clip_norm": 10.0,
+        "betas": [
+            0.9,
+            0.999
+        ],
+        "eps": 1e-08
+    },
+    "scheduler": null,
+    "eval": {
+        "n_episodes": 50,
+        "batch_size": 50,
+        "use_async_envs": true,
+        "recording": false,
+        "recording_repo_id": null,
+        "recording_private": false
+    },
+    "wandb": {
+        "enable": true,
+        "disable_artifact": false,
+        "project": "hepha",
+        "entity": null,
+        "notes": null,
+        "run_id": "unkleh5y",
+        "mode": null,
+        "add_tags": true
+    },
+    "peft": null,
+    "job": {
+        "target": null,
+        "image": "huggingface/lerobot-gpu:latest",
+        "timeout": "2d",
+        "detach": false,
+        "tags": []
+    },
+    "save_checkpoint_to_hub": true,
+    "sample_weighting": null,
+    "rename_map": {},
+    "checkpoint_path": null
+}
