@@ -357,10 +357,10 @@ twin.}{Robot platform and digital twin. The system consists of
 \label{fig:bimanual-platform}}
 
 \placeholderfigure{Insert an eight-panel figure arranged in two rows. The top
-row shows the four physical camera views: fixed head, fixed body, left wrist,
+row shows the four physical camera views: fixed top, fixed bottom, left wrist,
 and right wrist. The bottom row shows the corresponding MuJoCo views.}{Real
 and simulated visual observations. The top row shows the four physical camera
-views from the fixed head, fixed body, left wrist, and right wrist cameras. The
+views from the fixed top, fixed bottom, left wrist, and right wrist cameras. The
 bottom row shows the corresponding MuJoCo viewpoints. The simulated cameras
 are initialized from hardware-matched nominal poses and slightly randomized
 around these poses during training.
@@ -405,19 +405,19 @@ bimanual system.
 \subsection{Visual Observations}
 
 The robot uses four RGB viewpoints, shown in the top row of
-Fig.~\ref{fig:camera-views}. An Intel RealSense D415 is mounted on the fixed
-head above the arms and provides a global frontal view of the workspace. A
-second 30\,fps USB RGB camera is mounted in the fixed robot body below the
-arms, providing a lower global view. Two additional 30\,fps USB RGB cameras
-are mounted on the left and right wrists and provide close-range views of
-end-effector--object interactions. During robot training and deployment, the
-D415 is used in RGB-only mode; its depth stream is not provided to ACT or
-$\pi_{0.5}$.
+Fig.~\ref{fig:camera-views}. All four are identical 1-MP
+\texttt{HBV-W202012HD} USB RGB camera modules configured for
+\(1280\times720\) capture at 30\,fps. One fixed top camera is mounted above the
+arms and provides a global frontal view of the workspace, while one fixed
+bottom camera is mounted below the arms and provides a lower global view. The
+other two modules are mounted on the left and right wrists and provide
+close-range views of end-effector--object interactions. These robot-mounted
+cameras provide RGB observations only; none is an Intel RealSense D415.
 
 The MuJoCo environment reproduces the same four nominal camera placements and
 view directions as the physical robot, as shown in the bottom row of
 Fig.~\ref{fig:camera-views}. Simulated observations are rendered from matched
-head, body, left-wrist, and right-wrist viewpoints. Simulated camera poses are randomly perturbed around their hardware-matched
+top, bottom, left-wrist, and right-wrist viewpoints. Simulated camera poses are randomly perturbed around their hardware-matched
 nominal poses during training to improve robustness to viewpoint variations.
 Lighting and textures may also be randomized.
 
@@ -430,24 +430,23 @@ is not represented in the original $\pi_{0.5}$ training data.
 
 \subsection{Visual Observations}
 
-The robot uses four RGB viewpoints. An Intel RealSense D415 is mounted on the
-fixed head above the arms and provides a global frontal view of the workspace.
-A second 30\,fps USB RGB camera is mounted in the fixed robot body below the
-arms, providing a lower global view. Two additional 30\,fps USB RGB cameras are
-mounted on the left and right wrists and provide close-range views of
-end-effector/object interactions. During robot training and deployment, the
-D415 is used in RGB-only mode: its depth stream is not provided to ACT or
-$\pi_{0.5}$.
+The robot uses four identical 1-MP \texttt{HBV-W202012HD} USB RGB camera
+modules configured for \(1280\times720\) capture at 30\,fps. The fixed top and
+bottom cameras provide complementary global workspace views, while the left-
+and right-wrist cameras provide close-range views of end-effector--object
+interactions. The Intel RealSense D415 is not part of the robot camera suite;
+it is used only as the head-mounted RGB-D camera for egocentric human-data
+collection.
 
 The MuJoCo environment reproduces the same four nominal camera placements and
 view directions as the physical robot. Simulated training observations are
-rendered from these matched head, body, left-wrist, and right-wrist viewpoints.
+rendered from these matched top, bottom, left-wrist, and right-wrist viewpoints.
 Camera extrinsics are therefore held fixed to the corresponding real-hardware
 mounts in the main experiments; appearance properties such as lighting and
 textures may still be randomized.
 
 Before operation, the robot undergoes a calibration procedure in which the arm joint
-offsets are established for both arms. The fixed head/body cameras are
+offsets are established for both arms. The fixed top/bottom cameras are
 extrinsically calibrated to the robot frame, while the wrist-camera transforms
 are defined relative to their corresponding wrist links.
 
@@ -581,8 +580,8 @@ the four robot cameras,
 \begin{equation*}
 \begin{aligned}
 \mathbf{o}_t = \bigl\{&
-\mathbf{o}^{\mathrm{head}}_t,
-\mathbf{o}^{\mathrm{body}}_t,
+\mathbf{o}^{\mathrm{top}}_t,
+\mathbf{o}^{\mathrm{bottom}}_t,
 \\
 &\mathbf{o}^{\mathrm{left\ wrist}}_t,
 \\
@@ -590,9 +589,10 @@ the four robot cameras,
 \bigr\}.
 \end{aligned}
 \end{equation*}
-together with the robot configuration \(\mathbf{q}_t\). The D415 depth stream
-is not used as a robot-policy input. $\pi_{0.5}$ is conditioned on the
-natural-language instruction \(\ell\). Single-task ACT specialists require no
+together with the robot configuration \(\mathbf{q}_t\). The robot cameras are
+RGB-only, so no depth stream is used as a robot-policy input. The D415 is
+reserved for the separate egocentric human dataset. $\pi_{0.5}$ is conditioned
+on the natural-language instruction \(\ell\). Single-task ACT specialists require no
 task identifier; the multi-task ACT model receives a learned categorical
 embedding for the current task ID (T1--T7), providing a simple
 task-conditioning signal without adding a pretrained language encoder.
@@ -805,11 +805,11 @@ ACT--$\pi_{0.5}$ differences are reported only descriptively.
 \subsection{Target-Robot Behavior-Cloning Data}
 
 Real-robot demonstrations are collected on the custom bimanual robot through leader--follower
-teleoperation. The fixed head D415 RGB stream, fixed body RGB stream, and both
-wrist RGB streams are recorded synchronously at \(30\,\mathrm{Hz}\). The D415
-depth stream is disabled for the robot-policy dataset and is not used by ACT or
-$\pi_{0.5}$ during robot training or deployment. Joint positions and gripper
-states are recorded at the same time. For ACT, these recorded robot states
+teleoperation. The fixed top, fixed bottom, and two wrist RGB streams from the
+four identical \texttt{HBV-W202012HD} modules are recorded synchronously at
+\(1280\times720\) and \(30\,\mathrm{Hz}\). No D415 is mounted on the robot, and
+no depth stream is recorded for the robot-policy dataset. Joint positions and
+gripper states are recorded at the same time. For ACT, these recorded robot states
 directly define the action targets. For $\pi_{0.5}$, forward kinematics convert
 the robot trajectories to relative dual-arm Cartesian end-effector trajectories,
 with gripper commands retained as robot-specific action channels. Only
@@ -822,7 +822,7 @@ A MuJoCo digital twin is constructed from the robot's CAD and kinematic model.
 Simulated demonstrations are generated by defining task-specific Cartesian
 waypoints and using inverse kinematics to convert them into joint trajectories.
 The simulated robot contains the same four observation cameras as the real
-platform: fixed head, fixed body, left wrist, and right wrist. Their nominal
+platform: fixed top, fixed bottom, left wrist, and right wrist. Their nominal
 poses are matched to the physical camera mounts and remain fixed in the main
 experiments. Object poses, visual appearance, physical parameters, and control
 noise are randomized to improve sim-to-real transfer. The randomized parameters
@@ -835,8 +835,9 @@ for $\pi_{0.5}$.
 
 The egocentric dataset contains first-person RGB-D recordings of humans
 performing tasks aligned with the robot benchmark. For this data collection
-only, the Intel RealSense D415 depth stream is enabled. The D415 is worn in a
-head-mounted configuration and records synchronized RGB and depth. MediaPipe
+only, an Intel RealSense D415 is worn by the human recorder in a head-mounted
+configuration and records synchronized RGB and depth. The D415 is never used as
+a robot camera. MediaPipe
 Hands~\cite{zhang2020mediapipehands} detects 21 hand landmarks in the RGB image.
 For each visible landmark, the aligned depth measurement and calibrated camera
 intrinsics are used to back-project the image coordinate to a metric 3D point.
@@ -1326,9 +1327,9 @@ The arms use Feetech STS3215 servomotors, following the widely available
 LeRobot SO-101 configuration. These motors and their controllers can be
 purchased from standard online robotics suppliers. The platform consists of
 the two fixed manipulation arms and their controllers. The released hardware
-description also includes the fixed-head D415 mount, fixed body-camera mount,
-and left/right wrist-camera mounts, together with the camera calibration used
-to reproduce the corresponding MuJoCo viewpoints.
+description also includes the fixed top, fixed bottom, and left/right wrist
+camera mounts for the \texttt{HBV-W202012HD} modules, together with the camera
+calibration used to reproduce the corresponding MuJoCo viewpoints.
 
 Datasets and trained checkpoints will be released through
 \url{https://huggingface.co/tmeynier} under the following names:
@@ -1390,10 +1391,11 @@ Control delay       & Uniform & \TODO{} \\
 \begin{itemize}[leftmargin=*]
     \item Exact 12-DoF accounting: five kinematic arm joints plus one normalized
     gripper actuator per side, including the associated low-level controllers.
-    \item Intrinsics/extrinsics and resolution for the fixed head, fixed body,
-    left-wrist, and right-wrist cameras; confirmation that D415 depth is excluded
-    from robot-policy input; observation history, action representation, chunk
-    horizon, and execution horizon.
+    \item Intrinsics/extrinsics and resolution for the fixed top, fixed bottom,
+    left-wrist, and right-wrist \texttt{HBV-W202012HD} cameras; confirmation
+    that the head-mounted D415 is used only for egocentric human-data collection
+    and never as a robot-policy camera; observation history, action
+    representation, chunk horizon, and execution horizon.
     \item Dataset episodes, hours, task/source composition, failure retention,
     train/validation/test splitting unit, and licenses/consent.
     \item Parameter counts, pretrained checkpoint, trainable layers, optimizer,
