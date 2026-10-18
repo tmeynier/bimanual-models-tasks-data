@@ -1,1 +1,1 @@
-"""Hardware setup and diagnostic utilities for Hepha."""
+"""Hardware setup and diagnostic utilities for the bimanual robot."""

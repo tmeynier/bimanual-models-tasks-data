@@ -1,4 +1,4 @@
-"""Open any registered Hepha simulation backend in its interactive viewer."""
+"""Open any registered bimanual robot simulation backend in its interactive viewer."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 from .base import SimulationConfig, parse_backend_options
 from .registry import available_backends, create_backend
 
-MJPYTHON_GUARD = "HEPHA_MJPYTHON_ACTIVE"
+MJPYTHON_GUARD = "BIMANUAL_MJPYTHON_ACTIVE"
 
 
 def _parse_bool(value: str) -> bool:

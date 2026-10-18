@@ -1,1 +1,1 @@
-"""Built-in Hepha simulation backends."""
+"""Built-in bimanual robot simulation backends."""

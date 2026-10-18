@@ -1,0 +1,1536 @@
+\documentclass[10pt,conference]{IEEEtran}
+
+% ---------- Packages ----------
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage[capitalize,noabbrev]{cleveref}
+
+% IEEE-style PDF metadata and link colors.
+\hypersetup{
+  colorlinks=true,
+  citecolor=black,
+  linkcolor=black,
+  urlcolor=blue,
+  pdftitle={What Makes a Generalist Robot Policy?},
+  pdfauthor={Tristan Meynier}
+}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.6em}
+
+% ---------- Draft helpers ----------
+% Replace all \TODO{...} fields before submission.
+\newcommand{\TODO}[1]{\textcolor{red!70!black}{[TODO: #1]}}
+\newcommand{\pio}{\ensuremath{\pi_0}}
+\newcommand{\placeholderfigure}[2]{%
+  \begin{figure}[t]
+    \centering
+    \fbox{\parbox[c][4.2cm][c]{0.92\linewidth}{\centering #1}}
+    \caption{#2}
+  \end{figure}}
+\newcommand{\placeholderfigurewide}[2]{%
+  \begin{figure*}[t]
+    \centering
+    \fbox{\parbox[c][4.6cm][c]{0.95\textwidth}{\centering #1}}
+    \caption{#2}
+  \end{figure*}}
+
+\title{What Makes a Generalist Robot Policy?\\
+{\large A Study of Models, Tasks, and Data for Low-Cost Bimanual Manipulation}}
+
+\author{\IEEEauthorblockN{Tristan Meynier}
+\IEEEauthorblockA{Independent Researcher, Switzerland\\
+\texttt{meyniertristan10@gmail.com}}}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Generalist robot policies aim to reuse knowledge across tasks, environments,
+and embodiments while retaining reliable closed-loop control. This work studies
+several ingredients of that problem using a low-cost, custom-built fixed-base
+bimanual robot with 12 actuated degrees of freedom (DoF): each side has five
+arm-joint DoF and one independently actuated gripper. We compare Action
+Chunking Transformer (ACT) and the
+pretrained vision-language-action model $\pi_{0.5}$ under matched robot-data
+conditions, and perform parallel within-family ablations of simulated data and
+multi-task training. For each model family, we compare real-only and
+real-plus-simulation training, seven independently trained single-task
+specialists and one jointly trained seven-task policy, and robustness under
+standardized physical perturbations. Because raw human video does not provide
+robot joint actions, the egocentric-human-data ablation is performed only for
+$\pi_{0.5}$ using a cross-embodiment end-effector representation derived from
+RGB-D hand tracking. We evaluate all configurations through repeated closed-loop
+rollouts under matched initial conditions and report complete success, partial
+success, inference latency, and 95\% confidence intervals. Recovery is evaluated
+separately with controlled physical perturbations. The scope of the study is deliberately narrow:
+conclusions are restricted to the custom robot embodiment, the seven benchmark tasks,
+and the available data and compute budget. The robot's 3D-printable parts,
+MuJoCo simulation environment, and model training and inference code are
+available at \url{https://github.com/tmeynier/bimanual-models-tasks-data}.
+\end{abstract}
+
+\begin{IEEEkeywords}
+bimanual manipulation, robot learning, vision-language-action models,
+behavior cloning, simulation, egocentric data, closed-loop evaluation
+\end{IEEEkeywords}
+
+\placeholderfigurewide{Insert a paper overview: the custom bimanual robot hardware and the four
+robot camera views on the left; the matched ACT/$\pi_{0.5}$ simulation and
+multi-task ablations plus the $\pi_{0.5}$ egocentric-data ablation in the
+center; example nominal and perturbed closed-loop rollouts on the right.}{Overview
+of the custom bimanual platform and experimental study. ACT and $\pi_{0.5}$ are both
+evaluated with real-only and real-plus-simulation training, single-task
+specialists and multi-task training, and controlled perturbations. Egocentric
+human data are additionally evaluated with $\pi_{0.5}$ through a
+cross-embodiment end-effector representation.}
+
+\section{Introduction}
+\label{sec:introduction}
+
+Recent robot-learning research has increasingly shifted from policies designed
+for one robot and one task toward \emph{generalist robot policies}: models that
+can reuse knowledge across tasks, environments, objects, and embodiments.
+This direction is inspired by the foundation-model paradigm in language and
+vision: training increasingly capable models on larger and more diverse
+datasets, using greater computational resources, generally improves performance
+and produces representations that can be adapted to many downstream tasks.
+Robot learning aims to follow the same paradigm, but presents additional challenges. A robot policy must generate continuous, temporally correlated actions under partial observability, physical contact, sensor noise, and strict latency constraints. Moreover, each prediction changes the state from which the next prediction is made, so small errors can compound into unrecoverable failures. Robot-interaction data are also far more expensive to collect than text or images.
+
+Historically, much of robot learning has treated manipulation as a collection
+of task-specific problems: a policy is trained for one robot, one task, and one
+demonstration distribution, without relying on a general-purpose pretrained
+robot policy. Behavior cloning learns control directly from expert
+demonstrations, but can suffer from distribution shift when the learned policy
+visits states not covered by those demonstrations~\cite{ross2011dagger}. Action
+Chunking Transformer (ACT) improves temporal consistency by predicting sequences
+of future actions and has demonstrated precise bimanual manipulation using
+low-cost hardware~\cite{zhao2023act}. Generative approaches such as Diffusion
+Policy instead model \emph{multimodal} distributions over action trajectories,
+where multimodality means that several distinct action modes can be valid for
+the same observation and task~\cite{chi2023diffusion}. For example, a robot may
+reach the same object from different directions or use different grasp
+strategies. Modeling these alternatives as a distribution avoids collapsing
+them into a single averaged action that may not correspond to any valid
+behavior. These specialized
+methods remain strong baselines when the task and operating conditions are well
+specified, but they represent a narrower paradigm than generalist policies:
+their semantic knowledge, task coverage, and ability to transfer across
+embodiments are largely determined by the task-specific robot demonstrations on
+which they are trained.
+
+More recent vision-language-action (VLA) models follow a broader pretraining
+paradigm. They adapt pretrained vision-language representations, learned largely
+from Internet-scale image and text data, to robot control. Models in the
+\pio{} family combine a pretrained vision-language backbone with a continuous
+flow-matching action expert~\cite{black2024pi0}. Throughout this paper,
+``\pio{} family'' refers to this policy lineage, whereas $\pi_{0.5}$ denotes the
+specific member used in our experiments. In parallel, multi-task and
+cross-embodiment training increase the diversity of physical experience
+available to the policy. Open X-Embodiment showed positive transfer from data
+collected across many robot platforms~\cite{openx2023}, while
+$\pi_{0.5}$ demonstrated that heterogeneous robot, semantic, language, and web
+data can support long-horizon manipulation in previously unseen
+environments~\cite{black2025pi05}. Together, Internet-scale semantic pretraining
+and diverse robot experience provide a route toward policies whose knowledge is
+not tied to a single task or embodiment.
+
+A natural continuation of cross-embodiment learning is to treat humans as an
+additional embodiment. Egocentric human video is particularly attractive because
+it can capture large numbers of manipulation tasks, objects, and environments at
+a scale that is difficult to obtain with physical robots. Kareer et
+al.~\cite{kareer2025humanrobot} show that human-to-robot transfer emerges when a
+VLA is pretrained on sufficiently diverse robot scenes, tasks, and embodiments,
+suggesting that large-scale pretraining can produce representations that are
+increasingly agnostic to the acting embodiment. EgoScale further demonstrates
+predictable scaling from 20,854 hours of action-labeled egocentric human video
+and transfers the resulting motor priors to dexterous robot hands with limited
+robot supervision~\cite{zheng2026egoscale}. These findings make egocentric human
+experience a promising scalable source of cross-embodiment supervision for robot
+learning.
+
+Beyond direct policy learning, another emerging direction is the use of
+\emph{world models}. A world model is a learned predictive model of environment
+dynamics: given the current state or observation and, in an action-conditioned
+setting, candidate actions, it predicts how the world is likely to evolve. Such
+predictions can support planning by allowing an agent to compare possible future
+outcomes before executing an action. Joint-Embedding Predictive Architectures
+(JEPAs) learn predictive structure in representation space rather than
+reconstructing every image pixel~\cite{lecun2022path}. V-JEPA~2 scales this idea
+to more than one million hours of Internet video, and its action-conditioned
+variant V-JEPA~2-AC is post-trained on robot trajectories to predict future
+latent states under candidate actions, enabling model-based planning on physical
+robots~\cite{assran2025vjepa2}. This family illustrates a complementary path
+toward general-purpose robot intelligence: learning not only a policy that maps
+observations to actions, but also an internal predictive model of how actions
+change the physical world.
+
+This technical report asks how several ingredients commonly associated with
+more general robot policies behave in a deliberately small, resource-constrained
+setting. The study uses a custom-built robot embodiment together with
+behavior-cloning demonstrations, simulated trajectories, and egocentric human
+data. Across seven tasks, we ask: \emph{what is the incremental effect of
+simulated experience, multi-task parameter sharing, and egocentric human
+supervision on closed-loop task success and robustness in bimanual
+manipulation?} We additionally perform one exploratory zero-shot evaluation on
+a shape-conditioned sorting task held out from all benchmark fine-tuning data.
+We treat these as benchmark-specific measurements rather than evidence of
+general open-world capability.
+
+We study this question using a low-cost, custom-built fixed-base bimanual
+robot with 12 actuated degrees of freedom (DoF): ten pose-controlling arm
+joints and two independently actuated grippers. The benchmark contains seven tasks,
+listed in approximate order of increasing difficulty:
+
+\begin{enumerate}[leftmargin=*,label=\textbf{\arabic*.}]
+
+    \item \textbf{Placement --- Basic pick-and-place:}
+    Pick up a cube and place it inside a target container.
+
+    \item \textbf{Picking --- Object retrieval:}
+    Pick up a cube from inside a container and place it outside the container.
+
+    \item \textbf{Sorting --- Color-conditioned sorting:}
+    Sort the blue and green cubes into their respective containers.
+
+    \item \textbf{Articulated manipulation --- Drawer opening:}
+    Interpret a drawer number, locate the corresponding drawer, grasp its
+    handle, and open it.
+
+    \item \textbf{Precision manipulation --- Cube stacking:}
+    Pick up the green cube and place it stably on top of the blue cube.
+
+    \item \textbf{Bimanual collaboration --- Mid-air handover:}
+    Pick up a cube from a container with the right arm, transfer it to the left arm
+    in mid-air, and place it inside a second container.
+
+    \item \textbf{Long-horizon manipulation --- Warehouse stocking:}
+    Retrieve the cube of the requested color, open the
+    specified drawer, place the cube inside it, and close the drawer.
+
+\end{enumerate}
+
+Task durations range from about 10\,s for Tasks~1--6 to 20\,s for Task~7.
+
+We organize the experiments so that simulation and task-diversity effects are
+measured within both model families. Comparisons between ACT and $\pi_{0.5}$
+remain system-level comparisons rather than architecture-only ablations because
+the models differ in pretraining, scale, task conditioning, and action
+parameterization.
+
+\begin{enumerate}[leftmargin=*,label=\textbf{E\arabic*.}]
+    \item \textbf{Single-task model-family comparison:} ACT + real-robot BC and
+    $\pi_{0.5}$ + real-robot BC are trained on Task~1 using the same robot
+    demonstrations and evaluated under matched rollout conditions.
+
+    \item \textbf{Simulation comparisons in both model families:} for ACT and
+    $\pi_{0.5}$ separately, a Task~1 real-only policy is compared with
+    real-plus-simulation training under two protocols. The fixed-budget
+    ablation holds the total number of optimization examples constant; the
+    additive experiment preserves real-data exposure while adding simulated
+    examples and optimization steps.
+
+    \item \textbf{Task-diversity ablation in both model families:} for ACT and
+    $\pi_{0.5}$ separately, seven independently trained single-task specialists
+    are compared with one jointly trained seven-task policy. The same real and
+    simulated datasets are used per task, and the expected number of
+    optimization examples per task is matched between specialist and multi-task
+    conditions.
+
+    \item \textbf{Egocentric-data ablation for $\pi_{0.5}$:} the seven-task
+    $\pi_{0.5}$ policy is trained with or without aligned egocentric human data
+    under the same total optimization budget and real-robot sampling rate.
+    Human batches replace a matched fraction of simulation batches.
+
+    \item \textbf{Held-out-task generalization:} the trained multi-task ACT and
+    $\pi_{0.5}$ policies are evaluated without further training on a
+    shape-conditioned sorting task: place a rectangular block in the left
+    container and a cube in the right container. This task is excluded from all
+    benchmark training and validation sets. The $\pi_{0.5}+\mathrm{Ego}$ policy
+    is reported as an additional exploratory generalization condition.
+
+    \item \textbf{Controlled perturbation evaluation:} the trained multi-task
+    ACT and $\pi_{0.5}$ policies are evaluated without further training under
+    the same standardized physical interventions to measure recovery separately
+    from nominal task success. The $\pi_{0.5}+\mathrm{Ego}$ policy is reported
+    as an additional exploratory recovery condition.
+\end{enumerate}
+
+All configurations are evaluated through matched closed-loop rollouts. Complete
+and partial task success quantify nominal performance, while recovery is measured
+separately with standardized physical perturbations. Offline action error is
+used to select a checkpoint for each training run and is also reported as a
+training diagnostic; it is not treated as the primary performance metric because
+it does not capture compounding errors or closed-loop recovery.
+
+\paragraph{Contributions.}
+\begin{itemize}[leftmargin=*]
+    \item We introduce a low-cost, 3D-printed bimanual robot,
+    together with its MuJoCo simulation environment, four-view visual setup, and
+    a seven-task benchmark.
+
+    \item We provide matched within-family ablations for both ACT and
+    $\pi_{0.5}$, measuring the effect of simulated demonstrations and multi-task
+    parameter sharing while avoiding attribution of ACT--$\pi_{0.5}$ differences
+    to a single architectural factor.
+
+    \item We study whether RGB-D egocentric human demonstrations can provide
+    additional supervision to $\pi_{0.5}$ through a human-hand/robot-end-effector
+    representation, without fabricating robot joint labels for human video.
+
+    \item We evaluate recovery separately from nominal success using controlled
+    physical perturbations, allowing robustness differences between the trained
+    policies to be measured directly.
+\end{itemize}
+
+\section{Related Work}
+\label{sec:related-work}
+
+Research toward general-purpose robot manipulation has progressed from
+task-specific imitation learning to vision-language-action policies,
+cross-embodiment training, human demonstrations, and predictive world models.
+
+\paragraph{Task-specific imitation learning.}
+Behavior cloning learns robot control directly from demonstrations, but errors
+can compound when the policy encounters states absent from the training
+data~\cite{ross2011dagger}. ACT addresses long-horizon bimanual manipulation by
+predicting action chunks and temporally ensembling overlapping
+predictions~\cite{zhao2023act}. Diffusion Policy and flow-matching methods
+instead model distributions over action sequences, allowing multiple valid
+behaviors to be represented~\cite{chi2023diffusion,lipman2023flow}.
+
+\paragraph{Vision-language-action policies.}
+Vision-language-action (VLA) models connect pretrained visual-language
+representations to continuous robot control. The original $\pi_0$ combines a
+vision-language backbone with a flow-matching action
+expert~\cite{black2024pi0}. Its successor, $\pi_{0.5}$, introduces heterogeneous
+co-training and high-level semantic supervision to improve open-world
+generalization~\cite{black2025pi05}. We use $\pi_{0.5}$, rather than the original
+$\pi_0$, as the common pretrained base policy in our experiments.
+
+\paragraph{Cross-embodiment robot learning.}
+Cross-embodiment learning investigates whether experience collected with one
+physical system can improve control on another. This requires handling
+differences in camera viewpoints, kinematics, action spaces, and hardware.
+Open X-Embodiment showed that combining trajectories from heterogeneous robots can produce positive transfer across platforms~\cite{openx2023}.
+
+\paragraph{Egocentric human experience.}
+Humans can be viewed as an additional embodiment for which large and diverse
+datasets are considerably easier to collect than physical robot trajectories.
+Egocentric video therefore provides a scalable source of manipulation
+experience, although human-to-robot transfer must bridge differences in
+morphology, viewpoint, and action representation. Kareer
+et al.~\cite{kareer2025humanrobot} co-fine-tune $\pi_{0.5}$ on robot and
+egocentric human demonstrations; we denote this formulation as
+$\pi_{0.5}+\mathrm{Ego}$. EgoScale reports predictable improvements as the
+amount of action-labeled human video increases~\cite{zheng2026egoscale}.
+More recently, EgoWAM shows that predicting future DINO feature
+representations from egocentric data can improve out-of-distribution object and
+scene generalization by up to four times~\cite{li2026egowam}. These results
+suggest that human experience may provide a scalable source of
+cross-embodiment supervision, particularly when the learned representation
+captures embodiment-invariant scene dynamics rather than human actions alone.
+
+\paragraph{Predictive world models.}
+World models are not evaluated in our ablations, but represent a complementary
+direction for future work.
+
+Motivated by these large-scale studies, we examine whether some of these trends are observable on a custom, low-cost robot under limited data and compute.
+
+\section{Robot Architecture}
+\label{sec:robot}
+
+\placeholderfigure{Insert three panels showing: (a) the leader arms used for
+teleoperation, (b) the physical follower robot, and (c) the MuJoCo digital
+twin.}{Robot platform and digital twin. The system consists of
+(a) leader arms used for teleoperation and demonstration collection,
+(b) the physical fixed-base bimanual follower robot, and
+(c) the corresponding MuJoCo simulation environment.
+\label{fig:bimanual-platform}}
+
+\placeholderfigure{Insert an eight-panel figure arranged in two rows. The top
+row shows the four physical camera views: fixed head, fixed body, left wrist,
+and right wrist. The bottom row shows the corresponding MuJoCo views.}{Real
+and simulated visual observations. The top row shows the four physical camera
+views from the fixed head, fixed body, left wrist, and right wrist cameras. The
+bottom row shows the corresponding MuJoCo viewpoints. The simulated cameras
+are initialized from hardware-matched nominal poses and slightly randomized
+around these poses during training.
+\label{fig:camera-views}}
+
+The platform is a low-cost, 3D-printed fixed-base bimanual robot with
+12 actuated degrees of freedom (DoF):
+\begin{equation*}
+\begin{aligned}
+N_{\mathrm{DoF}}
+&= 2 \times \bigl(5~\text{arm-joint DoF}
+\\
+&\qquad\quad + 1~\text{gripper DoF}\bigr)
+\\
+&= 10~\text{arm-joint DoF}
+\\
+&\qquad + 2~\text{gripper DoF}
+\\
+&= 12.
+\end{aligned}
+\end{equation*}
+The complete system, including the leader arms, physical follower robot, and
+MuJoCo digital twin, is shown in Fig.~\ref{fig:bimanual-platform}.
+
+\subsection{Bimanual Manipulation Arms}
+
+The robot uses two 3D-printed arms. Each arm is actuated by six Feetech STS3215
+serial-bus servomotors, following HuggingFace's LeRobot SO-101 follower-arm
+configuration~\cite{lerobotso101}. Five joints control the arm configuration
+and wrist orientation, while the sixth independently actuates the gripper.
+Thus, each manipulator has five kinematic DoF that determine its end-effector
+pose plus one gripper DoF. The gripper actuator is included in the 12-DoF system
+count but does not provide an additional Cartesian pose DoF.
+
+The serial-bus servomotors provide commanded and measured joint positions,
+allowing the controller to operate the arms using joint-position feedback.
+The two arms are fixed relative to the workspace; all benchmark manipulation is
+therefore performed through arm and gripper motion alone. Objects and
+articulated fixtures are arranged inside the reachable workspace of the
+bimanual system.
+
+\subsection{Visual Observations}
+
+The robot uses four RGB viewpoints, shown in the top row of
+Fig.~\ref{fig:camera-views}. An Intel RealSense D415 is mounted on the fixed
+head above the arms and provides a global frontal view of the workspace. A
+second 30\,fps USB RGB camera is mounted in the fixed robot body below the
+arms, providing a lower global view. Two additional 30\,fps USB RGB cameras
+are mounted on the left and right wrists and provide close-range views of
+end-effector--object interactions. During robot training and deployment, the
+D415 is used in RGB-only mode; its depth stream is not provided to ACT or
+$\pi_{0.5}$.
+
+The MuJoCo environment reproduces the same four nominal camera placements and
+view directions as the physical robot, as shown in the bottom row of
+Fig.~\ref{fig:camera-views}. Simulated observations are rendered from matched
+head, body, left-wrist, and right-wrist viewpoints. Simulated camera poses are randomly perturbed around their hardware-matched
+nominal poses during training to improve robustness to viewpoint variations.
+Lighting and textures may also be randomized.
+
+Before operation, the robot undergoes a calibration procedure in which the arm
+joint offsets are established for both arms.
+
+The robot's custom morphology and multi-view observation setup make embodiment
+adaptation an important part of the study. Particularly this embodiment
+is not represented in the original $\pi_{0.5}$ training data.
+
+\subsection{Visual Observations}
+
+The robot uses four RGB viewpoints. An Intel RealSense D415 is mounted on the
+fixed head above the arms and provides a global frontal view of the workspace.
+A second 30\,fps USB RGB camera is mounted in the fixed robot body below the
+arms, providing a lower global view. Two additional 30\,fps USB RGB cameras are
+mounted on the left and right wrists and provide close-range views of
+end-effector/object interactions. During robot training and deployment, the
+D415 is used in RGB-only mode: its depth stream is not provided to ACT or
+$\pi_{0.5}$.
+
+The MuJoCo environment reproduces the same four nominal camera placements and
+view directions as the physical robot. Simulated training observations are
+rendered from these matched head, body, left-wrist, and right-wrist viewpoints.
+Camera extrinsics are therefore held fixed to the corresponding real-hardware
+mounts in the main experiments; appearance properties such as lighting and
+textures may still be randomized.
+
+Before operation, the robot undergoes a calibration procedure in which the arm joint
+offsets are established for both arms. The fixed head/body cameras are
+extrinsically calibrated to the robot frame, while the wrist-camera transforms
+are defined relative to their corresponding wrist links.
+
+The robot's custom morphology and multi-view observation setup make embodiment
+adaptation an important part of the study.
+
+\section{Task Suite}
+\label{sec:tasks}
+
+The seven benchmark tasks are summarized in
+Table~\ref{tab:tasks} in approximate order of increasing difficulty.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Manipulation tasks, ordered by approximate difficulty. All objects and fixtures are positioned within the fixed bimanual workspace.}
+\label{tab:tasks}
+\begin{tabularx}{\textwidth}
+{@{}p{0.30\textwidth}X@{}}
+\toprule
+\textbf{Task title} &
+\textbf{Language instruction} \\
+\midrule
+
+T1: Basic object placement &
+``Pick up the cube and place it inside the target container.'' \\
+
+T2: Object retrieval &
+``Pick up the cube from the container and place it outside the container.'' \\
+
+T3: Color-conditioned sorting &
+``Sort the blue and green cubes into their respective containers.'' \\
+
+T4: Number-conditioned drawer opening &
+``Open the drawer with the requested number.'' \\
+
+T5: Precision cube stacking &
+``Place the green cube stably on top of the blue cube.'' \\
+
+T6: Bimanual mid-air handover &
+``Pick up the cube from the first container with the right arm, transfer it to the
+left arm in mid-air, and place it inside the second container.'' \\
+
+T7: Warehouse stocking &
+``Retrieve the cube of the requested color, open the requested drawer, place the cube inside, and close the drawer.'' \\
+
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\section{Study Design}
+\label{sec:study-design}
+
+\subsection{Operational definition of a generalist policy}
+
+We emphasize that, in this report, ``generalist'' is used in a restricted benchmark sense. A
+single policy is considered more general within this benchmark when it can execute a
+larger portion of the seven-task suite without using a separate model for each
+task. We additionally report one exploratory held-out shape-sorting test, but this does
+not establish broad zero-shot generalization, transfer to new environments, or
+transfer to a new robot embodiment. We report
+\emph{complete success}, indicating whether the full task is completed, and
+\emph{partial success}, defined as the fraction of predefined subtasks completed
+during the longer-horizon task. These metrics do not directly penalize collisions
+or undesirable execution paths when the task is nevertheless completed, so all
+rollouts are also inspected for anomalous behavior. Recovery is not inferred
+from nominal success; it is evaluated separately using the controlled
+perturbation protocol described in Sec.~\ref{sec:results}. For the longer-horizon
+task, partial success is computed from a predefined sequence of task-specific
+subgoals.
+
+\subsection{Tested Hypotheses}
+
+The experiments test the following benchmark-specific hypotheses. We report
+both positive and negative changes and avoid treating a null result as evidence
+that an ingredient is unimportant outside this setup.
+
+\begin{description}[leftmargin=0pt,labelindent=0pt,style=nextline]
+    \item[H1: Model-family comparison]
+    Under the same Task~1 robot demonstration set, ACT and $\pi_{0.5}$ may
+    differ in success and inference latency. Because the systems differ in
+    pretraining, scale, task conditioning, and action parameterization, this
+    comparison is descriptive and is not used to isolate any one factor.
+
+    \item[H2: Simulation data]
+    Within each model family, we report both a fixed-budget comparison, in which
+    simulated batches replace repeated real-data batches, and an additive
+    comparison, in which real-data exposure is preserved while simulation and
+    optimization steps are added. The former isolates the data-source
+    substitution under fixed compute; the latter measures the practical effect
+    of adding simulation when additional compute is allowed.
+
+    \item[H3: Multi-task parameter sharing]
+    Within each model family, with matched per-task datasets and optimization
+    exposure, a single seven-task policy may perform differently from seven
+    independently trained specialists. A positive difference is interpreted as
+    evidence consistent with beneficial transfer within this benchmark; a
+    negative difference indicates interference.
+
+    \item[H4: Egocentric human data]
+    For $\pi_{0.5}$, under a fixed total optimization budget and fixed
+    real-robot sampling rate, replacing a portion of simulation batches with
+    aligned egocentric human data may change multi-task performance. This
+    condition is not mirrored for standard ACT because human videos do not
+    provide the robot joint-action targets expected by that baseline.
+
+    \item[H5: Held-out-task generalization]
+    Without additional fine-tuning, the multi-task $\pi_{0.5}$ policy may
+    transfer to a shape-conditioned sorting instruction excluded from all
+    benchmark fine-tuning data. The $\pi_{0.5}+\mathrm{Ego}$ result is reported
+    as an exploratory additional condition. Standard ACT is not evaluated
+    because its categorical task conditioning cannot specify an unseen task
+    without learning new task-specific parameters. Any success is interpreted
+    only as transfer to this held-out task, not as general open-world capability.
+
+    \item[H6: Perturbation recovery]
+    Under matched physical perturbations, ACT and $\pi_{0.5}$ may differ in
+    recovery success even when their nominal success rates are similar. This is
+    interpreted as robustness to the tested interventions, not as a general
+    measure of self-correction. The $\pi_{0.5}+\mathrm{Ego}$ result is reported
+    as an exploratory additional condition.
+\end{description}
+
+\section{Policy Models}
+\label{sec:models}
+
+\subsection{Observations, Actions, and Control}
+
+At time \(t\), both policy families receive synchronized RGB observations from
+the four robot cameras,
+\begin{equation*}
+\begin{aligned}
+\mathbf{o}_t = \bigl\{&
+\mathbf{o}^{\mathrm{head}}_t,
+\mathbf{o}^{\mathrm{body}}_t,
+\\
+&\mathbf{o}^{\mathrm{left\ wrist}}_t,
+\\
+&\mathbf{o}^{\mathrm{right\ wrist}}_t
+\bigr\}.
+\end{aligned}
+\end{equation*}
+together with the robot configuration \(\mathbf{q}_t\). The D415 depth stream
+is not used as a robot-policy input. $\pi_{0.5}$ is conditioned on the
+natural-language instruction \(\ell\). Single-task ACT specialists require no
+task identifier; the multi-task ACT model receives a learned categorical
+embedding for the current task ID (T1--T7), providing a simple
+task-conditioning signal without adding a pretrained language encoder.
+
+The 12-dimensional robot configuration is ordered as
+\begin{equation*}
+\begin{aligned}
+\mathbf{q}_t = \bigl[&
+\mathbf{q}^{L,\mathrm{arm}}_t,
+g^L_t,
+\\
+&\mathbf{q}^{R,\mathrm{arm}}_t,
+g^R_t
+\bigr],
+\\
+\mathbf{q}^{L,\mathrm{arm}}_t,
+\mathbf{q}^{R,\mathrm{arm}}_t
+&\in \mathbb{R}^{5},
+\\
+g^L_t,g^R_t &\in [0,1].
+\end{aligned}
+\end{equation*}
+Only the ten arm-joint components enter the forward- and inverse-kinematics
+calculations; the two gripper components are independent normalized actuator
+states.
+
+Both model families predict action chunks with horizon \(H=50\). ACT predicts
+delta commands for the five pose-controlling joints of each arm together with
+one absolute normalized gripper target per arm:
+\begin{equation}
+\begin{aligned}
+    \pi^{\mathrm{ACT}}_\theta\!\Biggl(
+    &\bigl[
+    \Delta\mathbf{q}^{L,\mathrm{arm}},g^L,
+    \\
+    &\quad \Delta\mathbf{q}^{R,\mathrm{arm}},g^R
+    \bigr]_{t:t+49}
+    \\
+    &\Bigm|
+    \mathbf{o}_t,\mathbf{q}_t,e_{\mathrm{task}}
+    \Biggr).
+\end{aligned}
+\end{equation}
+
+For $\pi_{0.5}$, robot and human motion are expressed in a shared Cartesian
+task space. For arm \(a\in\{L,R\}\), forward kinematics convert the measured
+robot joint configuration into an end-effector pose,
+\begin{equation}
+    \mathbf{T}^{a}_t =
+    \operatorname{FK}\!\left(\mathbf{q}^{a,\mathrm{arm}}_t\right),
+\end{equation}
+and the future poses in an action chunk are represented relative to the current
+pose:
+\begin{equation}
+\begin{aligned}
+    \Delta\mathbf{T}^{a}_{t,h}
+    &=
+    \left(\mathbf{T}^{a}_t\right)^{-1}
+    \mathbf{T}^{a}_{t+h},
+    \\
+    h &= 0,\ldots,H-1.
+\end{aligned}
+\end{equation}
+The egocentric human hand trajectories are converted to an analogous relative
+pose representation after compensating for head-camera motion. This provides
+a common geometric supervision signal without requiring a fictitious mapping
+between human arm joints and robot joint angles.
+
+At deployment, the policy predicts what each end effector should do, while the
+inverse-kinematics controller determines how the robot joints should realize
+that motion. Each predicted relative pose is composed with the current
+end-effector pose to obtain a desired Cartesian target. The inverse-kinematics
+solver is initialized from the current joint configuration and enforces joint
+limits while preferring temporally continuous solutions. Because each arm has
+five joints that affect its end-effector pose, an arbitrary 6-DoF target is not
+always exactly reachable. The controller therefore uses a weighted Cartesian
+objective that prioritizes translation and the task-relevant orientation
+components, projecting the desired pose onto the arm's reachable task space.
+
+The gripper is represented separately from the Cartesian pose. For each arm,
+the raw servo position \(s\) is normalized to an absolute gripper command
+\(g\in[0,1]\):
+\begin{equation}
+\begin{aligned}
+    g &=
+    \operatorname{clip}\!\Biggl(
+        \frac{s-s_{\mathrm{open}}}
+             {s_{\mathrm{closed}}-s_{\mathrm{open}}},
+    \\
+    &\qquad 0,1\Biggr),
+\end{aligned}
+\end{equation}
+where \(s_{\mathrm{open}}\) and \(s_{\mathrm{closed}}\) are the calibrated
+servo positions for that gripper, \(g=0\) denotes fully open, and \(g=1\)
+denotes fully closed. The value \(g\) is a normalized actuator state rather
+than an additional end-effector pose coordinate. Thus, each
+$\pi_{0.5}$ action contains relative Cartesian targets for the left and right
+end effectors together with one absolute gripper command per arm. Robot
+demonstrations supervise all action channels. Human batches supervise only the
+aligned Cartesian channels because the egocentric recordings do not provide
+reliable robot-gripper targets; their gripper losses are masked rather than
+assigned artificial values.
+
+This action-space difference is one reason that direct ACT--$\pi_{0.5}$
+comparisons are treated as system-level rather than architecture-only
+comparisons.
+
+At deployment, the controller operates at \(50\,\mathrm{Hz}\), and the first
+\(K=25\) actions from each predicted chunk are executed before the policy
+replans. This corresponds to \(0.5\,\mathrm{s}\) of control between successive
+policy predictions, following the inference protocol used by the original
+$\pi_0$ policy~\cite{black2024pi0}. We do not use temporal ensembling in the
+main experiments because it reduced performance in preliminary tests.
+
+\subsection{Behavior Cloning and Action Chunking}
+
+Behavior cloning fits a policy to demonstration pairs by supervised learning.
+It is simple and stable, but its training distribution is generated by the
+demonstrator and generally contains mostly correct or successful behavior.
+Consequently, the policy receives limited supervision for states caused by
+mistakes or unexpected perturbations. During autonomous execution, small
+errors can therefore move the robot into unseen states and compound over time.
+Recovery demonstrations, trajectory perturbations, interactive data
+aggregation, reinforcement learning, and recovery-focused fine-tuning can all
+reduce this mismatch.
+
+ACT uses a Transformer to predict action chunks and a conditional variational
+autoencoder (CVAE) latent during training~\cite{zhao2023act}. The latent
+variable helps represent multimodal demonstrations by capturing variations
+between multiple valid action strategies. Chunking captures short-term motion
+intent, reduces the effective decision horizon, and can smooth control through
+temporal ensembling. ACT is comparatively compact and can be trained as either
+a specialist or, in our multi-task condition, a task-ID-conditioned shared
+policy.
+
+\subsection{\texorpdfstring{\pio{} Family}{pi0 Family}: Pretrained VLA with Flow Matching}
+
+The \pio{} family comprises vision-language-action (VLA) models that map visual
+observations, language instructions, and robot state to continuous
+actions~\cite{black2024pi0,black2025pi05}. The specific policy instantiated in
+all experiments below is $\pi_{0.5}$.
+
+The complete $\pi_{0.5}$ policy consists of a PaliGemma vision-language
+backbone and a robotics-specific action expert. The backbone is initialized
+from large-scale image--text pretraining~\cite{beyer2024paligemma}, but the
+cross-embodiment prior does not come from this Internet pretraining alone.
+Before adaptation to our robot, the complete $\pi_{0.5}$ checkpoint has been
+jointly trained on heterogeneous data from multiple robot platforms, tasks,
+camera configurations, and action spaces. Cross-embodiment knowledge therefore
+enters through the shared VLA checkpoint---including both its robot-adapted
+representations and action expert---rather than through a newly initialized
+robot-specific output head.
+
+The \pio{}-family action expert generates continuous action chunks using
+conditional flow matching. Starting from a noisy action sample
+\(\mathbf{x}_\tau\) at flow time \(\tau\in[0,1]\), the model learns a velocity
+field \(v_\theta\) that transports samples from a simple noise distribution
+toward the demonstrated action distribution:
+\begin{equation}
+\begin{aligned}
+    \frac{d\mathbf{x}_\tau}{d\tau}
+    &=
+    v_\theta\!\Biggl(
+    \mathbf{x}_\tau,\tau
+    \\
+    &\qquad\Bigm|
+    \mathbf{o}_t,\mathbf{q}_t,\ell
+    \Biggr).
+\end{aligned}
+\end{equation}
+Because flow matching models a distribution over action sequences, it can
+represent multiple valid manipulation strategies rather than averaging them
+into a single action. Its main drawbacks are greater compute and memory
+requirements.
+
+\paragraph{Parameter-efficient adaptation.}
+To limit training memory while preserving the pretrained cross-embodiment
+representations, we initialize every VLA condition from the same complete
+$\pi_{0.5}$ base checkpoint and freeze the original weights of both the
+vision-language backbone and the pretrained action expert. Trainable low-rank
+adaptation (LoRA) modules are inserted into the attention layers of both
+components. The proprioception projection, action-input projection, and
+action-output projection remain fully trainable. This fixed parameterization is
+used for every VLA condition; the action expert is never fully fine-tuned.
+
+Restricting updates to LoRA modules and the robotics-specific projection layers
+reduces the risk of catastrophic forgetting, in which adaptation to the custom
+robot could overwrite visual, semantic, or manipulation representations learned
+during pretraining. Parameter-efficient adaptation limits rather than
+eliminates this risk; the retained capabilities are therefore treated as a
+pretrained prior rather than assumed to remain perfectly unchanged.
+
+The robot-only $\pi_{0.5}$ and
+$\pi_{0.5}+\mathrm{Ego}$ conditions use exactly the same trainable parameter
+set, LoRA rank, optimizer, learning-rate schedule, initialization, and
+checkpoint-selection procedure. The same backbone and action-expert LoRA
+modules, together with the same trainable projection layers, are shared across
+robot and human batches. Consequently, the egocentric ablation changes the
+training data mixture without introducing additional trainable capacity.
+
+Both policy families predict action chunks, but they differ substantially in
+scale, initialization, task conditioning, output parameterization, and
+adaptation procedure. The within-ACT and within-$\pi_{0.5}$ ablations therefore
+provide the cleaner evidence about simulation and task diversity; direct
+ACT--$\pi_{0.5}$ differences are reported only descriptively.
+
+\section{Data}
+\label{sec:data}
+
+\subsection{Target-Robot Behavior-Cloning Data}
+
+Real-robot demonstrations are collected on the custom bimanual robot through leader--follower
+teleoperation. The fixed head D415 RGB stream, fixed body RGB stream, and both
+wrist RGB streams are recorded synchronously at \(30\,\mathrm{Hz}\). The D415
+depth stream is disabled for the robot-policy dataset and is not used by ACT or
+$\pi_{0.5}$ during robot training or deployment. Joint positions and gripper
+states are recorded at the same time. For ACT, these recorded robot states
+directly define the action targets. For $\pi_{0.5}$, forward kinematics convert
+the robot trajectories to relative dual-arm Cartesian end-effector trajectories,
+with gripper commands retained as robot-specific action channels. Only
+demonstrations that ultimately complete the task are retained, including those
+that contain successful recovery behaviors.
+
+\subsection{Simulation Data}
+
+A MuJoCo digital twin is constructed from the robot's CAD and kinematic model.
+Simulated demonstrations are generated by defining task-specific Cartesian
+waypoints and using inverse kinematics to convert them into joint trajectories.
+The simulated robot contains the same four observation cameras as the real
+platform: fixed head, fixed body, left wrist, and right wrist. Their nominal
+poses are matched to the physical camera mounts and remain fixed in the main
+experiments. Object poses, visual appearance, physical parameters, and control
+noise are randomized to improve sim-to-real transfer. The randomized parameters
+and their sampling ranges are reported in
+Appendix~\ref{app:sim-randomization}. The same simulated trajectory can
+therefore provide joint-space targets for ACT and Cartesian end-effector targets
+for $\pi_{0.5}$.
+
+\subsection{Egocentric Human Data}
+
+The egocentric dataset contains first-person RGB-D recordings of humans
+performing tasks aligned with the robot benchmark. For this data collection
+only, the Intel RealSense D415 depth stream is enabled. The D415 is worn in a
+head-mounted configuration and records synchronized RGB and depth. MediaPipe
+Hands~\cite{zhang2020mediapipehands} detects 21 hand landmarks in the RGB image.
+For each visible landmark, the aligned depth measurement and calibrated camera
+intrinsics are used to back-project the image coordinate to a metric 3D point.
+Robust local depth statistics and temporal filtering are used to reduce missing
+or noisy depth values.
+
+A compact human ``end-effector'' frame is then constructed from the 3D hand
+geometry. The palm position is derived from the wrist and metacarpophalangeal
+landmarks, while palm orientation is estimated from orthogonal axes spanning
+the wrist, index-base, and little-finger-base landmarks. The resulting 6-DoF
+hand poses are tracked over time and converted to relative pose trajectories.
+Camera ego-motion from the head-mounted recording is compensated using the
+RGB-D sequence so that the pseudo-actions primarily describe hand motion rather
+than head motion. The exact filtering and camera-motion parameters are reported
+with the released preprocessing code.
+
+Human videos do not contain robot joint positions or robot joint actions. We
+therefore do not fabricate joint labels. Instead, following the cross-embodiment
+co-training idea of Kareer et al.~\cite{kareer2025humanrobot}, we represent
+human low-level actions as relative 6-DoF hand end-effector trajectories and
+represent $\pi_{0.5}$ robot actions in the analogous relative end-effector
+space. The human left/right hand tracks supervise the corresponding Cartesian
+action channels. Human gripper labels are not synthesized; gripper-action loss
+is masked on human batches and remains supervised only by robot data. Each
+human trajectory also carries the task language instruction, and short subtask
+descriptions may be used where available.
+
+During $\pi_{0.5}+\mathrm{Ego}$ fine-tuning, human and robot batches are
+co-trained in the same optimization run. Robot batches retain the ordinary
+robot action supervision, while human batches train the shared visual-language
+representation and the aligned end-effector prediction objective. Thus, the
+human data can contribute manipulation and visual experience without requiring
+a fictitious mapping from a human hand to the robot's joint angles. This experiment
+is specific to the VLA condition and is not applied to standard ACT.
+
+\subsection{Dataset Composition}
+
+Table~\ref{tab:data} summarizes each training source in episodes and hours,
+since adjacent video frames are highly correlated and do not represent
+independent demonstrations.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Balanced composition of the available training datasets.}
+\label{tab:data}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Source & Tasks & Episodes/task & Total episodes & Hours \\
+\midrule
+Real-robot BC    & 7 & 60  & 420   & 10.5 \\
+Simulation       & 7 & 500 & 3,500 & 58.4 \\
+Egocentric human & 7 & 100 & 700   & 17.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All retained demonstrations complete their assigned task, although some include
+successful recovery behaviors. The table reports the available data pool; the
+main ablations do not simply consume all available samples. Instead, batch
+sampling and optimization budgets are matched according to the comparison being
+performed, as described in Sec.~\ref{sec:protocol}.
+
+\section{Training and Evaluation Protocol}
+\label{sec:protocol}
+
+We retain the default hyperparameters of the official ACT and $\pi_{0.5}$
+implementations unless otherwise stated. Within each model family, the
+optimizer, learning rate, batch size, image preprocessing, action horizon, and
+checkpoint-selection procedure are kept fixed across the relevant comparisons.
+Training data are split by complete episodes to avoid frame-level leakage.
+Validation mean-squared error (MSE) is measured every $\TODO{}$ steps, used to
+select the checkpoint for each run, and reported as a training diagnostic; the
+primary reported metric is closed-loop task success.
+
+The experimental matrix is summarized in Table~\ref{tab:training-matrix}.
+Perturbation evaluation reuses the trained multi-task checkpoints and therefore
+does not require additional policy training.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Training/evaluation matrix. Ego data are not used with standard ACT
+because the human recordings lack ACT's robot joint-action targets.}
+\label{tab:training-matrix}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Condition & ACT & $\pi_{0.5}$ \\
+\midrule
+T1, real & Yes & Yes \\
+T1, real + sim. (fixed) & Yes & Yes \\
+T1, real + sim. (additive) & Yes & Yes \\
+7 single-task specialists, real + simulation & Yes & Yes \\
+1 seven-task model, real + simulation & Yes & Yes \\
+1 seven-task model + ego & -- & Yes \\
+Held-out shape sorting & Yes & Yes \\
+Perturbation evaluation & Yes & Yes \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For the single-task ACT--$\pi_{0.5}$ comparison, both models use the same
+train/validation split of Task~1 real-robot trajectories and the same evaluation
+initial conditions. This remains a system-level comparison because model size,
+pretraining, task conditioning, and action parameterization are not matched.
+
+For the simulation study, we report two comparisons independently for ACT and
+$\pi_{0.5}$. In the fixed-budget ablation, the real-only and
+real-plus-simulation conditions use the same total number of optimization steps.
+Batches assigned to the simulation fraction in the mixed condition are replaced
+by resampled real-robot batches in the real-only condition; no unique real
+episode is removed. The real/simulation batch ratio is $\TODO{}$.
+
+In the additive experiment, the real-plus-simulation condition retains the same
+expected number of real-robot batches as the real-only baseline and adds
+simulated batches, increasing the total number of optimization steps from
+$\TODO{}$ to $\TODO{}$. The fixed-budget comparison isolates the substitution
+of simulated experience for repeated real-data exposure, whereas the additive
+comparison measures the practical benefit of adding simulation and compute
+together. Neither comparison tests simulation against collecting an equal amount
+of new real-robot data.
+
+For the task-diversity ablation, we train seven independent ACT specialists and
+one task-ID-conditioned seven-task ACT policy, and separately train seven
+independent $\pi_{0.5}$ specialists and one seven-task $\pi_{0.5}$ policy. Each
+specialist sees only the real and simulated data for its task. The multi-task
+models sample tasks uniformly. If one specialist receives \(U\) optimization
+examples, the corresponding multi-task policy receives approximately \(7U\)
+examples in total so that expected exposure per task is matched. This design
+allows the specialist-to-multi-task effect to be measured separately for each
+policy family.
+
+For the egocentric-data ablation, only $\pi_{0.5}$ is considered. The two
+seven-task VLA conditions use the same total number of optimization steps and
+the same real-robot batch probability. In the human-data condition, a fraction
+$\TODO{}$ of batches that would otherwise be sampled from simulation is replaced
+by aligned egocentric human batches. Human samples supervise the relative
+hand/end-effector action objective described in Sec.~\ref{sec:data}; missing
+human gripper targets are masked rather than imputed.
+
+The held-out-task and controlled-perturbation evaluations follow the same
+general protocol. Both reuse the selected multi-task checkpoints without
+additional training, use $\TODO{}$ matched rollout seeds per policy, preserve
+the same camera observations, controller frequency, action-execution horizon,
+and task-appropriate timeouts across policies, and report exact successes with
+95\% confidence intervals.
+ACT and $\pi_{0.5}$ form the primary descriptive comparison;
+$\pi_{0.5}+\mathrm{Ego}$ is reported as an exploratory additional condition in
+both evaluations.
+
+For the held-out-task evaluation, we predeclare the instruction ``Place the
+rectangular block in the left container and the cube in the right container''
+before any policy training or test rollouts. The rectangular block, the
+shape-based instruction, and the object-to-container assignment are excluded
+from all real-robot, simulation, egocentric, and validation data used for
+benchmark fine-tuning. The $\pi_{0.5}$ and $\pi_{0.5}+\mathrm{Ego}$ policies
+receive this natural-language instruction. Because multi-task ACT uses
+categorical task embeddings rather than language, it receives the existing T3
+sorting-task ID; no new embedding is added or trained. The ACT--$\pi_{0.5}$
+result is therefore a comparison between complete systems with different task
+conditioning, not an architecture-only ablation. Since $\pi_{0.5}$ is
+pretrained, ``held out'' refers specifically to the benchmark fine-tuning data
+and does not assert that the task concept was absent from its original
+pretraining corpus.
+
+Complete success requires both objects to be inside their assigned containers
+at the end of the rollout, with neither object in the wrong container. Partial
+success is the fraction of correctly sorted objects, yielding scores of $0$,
+$0.5$, or $1$. Initial object poses are sampled from the same predeclared
+set for all three policies.
+
+Checkpoint selection is based only on held-out real-robot episodes. All
+closed-loop test rollouts use the selected checkpoint and are excluded from
+model selection and hyperparameter tuning. We report the selected checkpoint
+step, number of training seeds, total optimization examples, and data mixture
+for every trained configuration.
+
+\section{Experimental Evaluation and Results}
+\label{sec:results}
+
+We report direct model-family comparisons separately from within-family
+ablations. Complete success is the primary nominal metric; partial success is
+reported for the longer-horizon task, and inference latency is measured on the deployment
+hardware. Success values are reported with 95\% confidence intervals.
+Simulation and specialist-to-multi-task effects are computed separately for ACT
+and $\pi_{0.5}$; differences between the two model families are interpreted
+descriptively rather than as isolated architectural effects.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Closed-loop nominal results. ``Fixed'' matches total optimization
+examples; ``additive'' preserves real-data exposure and adds simulation updates.
+``7 specialists'' denotes seven independently trained single-task policies
+evaluated on their corresponding tasks and averaged over the seven-task suite.}
+\label{tab:main-results}
+\begin{tabular}{@{}llccc@{}}
+\toprule
+Model & Training condition &
+Complete success (\%) &
+Partial success (\%) &
+Latency (ms) \\
+\midrule
+ACT & T1, real
+    & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}$ & T1, real
+    & \TODO{} & \TODO{} & \TODO{} \\
+ACT & T1, real + simulation (fixed budget)
+    & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}$ & T1, real + simulation (fixed budget)
+    & \TODO{} & \TODO{} & \TODO{} \\
+ACT & T1, real + simulation (additive)
+    & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}$ & T1, real + simulation (additive)
+    & \TODO{} & \TODO{} & \TODO{} \\
+ACT & 7 specialists, real + simulation
+    & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}$ & 7 specialists, real + simulation
+    & \TODO{} & \TODO{} & \TODO{} \\
+ACT & 1 seven-task model, real + simulation
+    & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}$ & 1 seven-task model, real + simulation
+    & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}+\mathrm{Ego}$ & 1 seven-task model
+    & \TODO{} & \TODO{} & \TODO{} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{Main comparisons.}
+The Task~1 ACT--$\pi_{0.5}$ comparison changes complete success by \TODO{}
+percentage points and median inference latency by \TODO{} ms. We report this
+only as a comparison between two complete systems and do not attribute the
+difference to pretraining, architecture, model scale, or action representation
+in isolation.
+
+Under the fixed-budget protocol, replacing repeated real-data exposure with
+simulation changes Task~1 success by \TODO{} percentage points for ACT and
+\TODO{} percentage points for $\pi_{0.5}$. Under the additive protocol,
+retaining real-data exposure and adding simulation changes success by \TODO{}
+percentage points for ACT and \TODO{} percentage points for $\pi_{0.5}$, while
+increasing total optimization examples from \TODO{} to \TODO{}. The first
+comparison isolates data-source substitution under fixed compute; the second
+measures the practical simulation-plus-compute effect.
+
+For task diversity, the ACT specialist-to-multi-task difference is \TODO{}
+percentage points and the $\pi_{0.5}$ difference is \TODO{} percentage points.
+A positive difference is described as evidence consistent with beneficial
+cross-task transfer within this benchmark, while a negative difference is
+described as interference. Finally, replacing a matched fraction of simulation
+batches with egocentric human data changes $\pi_{0.5}$ multi-task success by
+\TODO{} percentage points. Any interpretation is restricted to the data mixture,
+task suite, and compute budget used here.
+
+\paragraph{Per-task results.}
+Table~\ref{tab:per-task} reports complete success for both model families under
+specialist and multi-task training, together with the $\pi_{0.5}+\mathrm{Ego}$
+condition. This breakdown indicates whether average changes are shared across
+tasks or concentrated on a small subset.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Closed-loop complete success rate (\%) by task.}
+\label{tab:per-task}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+Configuration & T1 & T2 & T3 & T4 & T5 & T6 & T7 \\
+\midrule
+ACT specialists + BC + simulation
+& \TODO{} & \TODO{} & \TODO{} & \TODO{}
+& \TODO{} & \TODO{} & \TODO{} \\
+
+ACT multi-task + BC + simulation
+& \TODO{} & \TODO{} & \TODO{} & \TODO{}
+& \TODO{} & \TODO{} & \TODO{} \\
+
+$\pi_{0.5}$ specialists + BC + simulation
+& \TODO{} & \TODO{} & \TODO{} & \TODO{}
+& \TODO{} & \TODO{} & \TODO{} \\
+
+$\pi_{0.5}$ multi-task + BC + simulation
+& \TODO{} & \TODO{} & \TODO{} & \TODO{}
+& \TODO{} & \TODO{} & \TODO{} \\
+
+$\pi_{0.5}+\mathrm{Ego}$ multi-task
+& \TODO{} & \TODO{} & \TODO{} & \TODO{}
+& \TODO{} & \TODO{} & \TODO{} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{Held-out-task generalization.}
+The held-out shape-sorting instruction is evaluated without fine-tuning under
+matched initial conditions. Table~\ref{tab:held-out-task} reports complete
+success for the same three multi-task policies used in the perturbation study.
+ACT and $\pi_{0.5}$ form the primary descriptive comparison, while
+$\pi_{0.5}+\mathrm{Ego}$ is an exploratory additional condition. The result is
+treated as a measurement on one task rather than evidence of broad zero-shot
+generalization.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Performance on the shape-conditioned sorting task held out from
+benchmark fine-tuning. ACT and $\pi_{0.5}$ form the primary descriptive
+comparison; $\pi_{0.5}+\mathrm{Ego}$ is exploratory.}
+\label{tab:held-out-task}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Policy & Successes/rollouts & Success (95\% CI) \\
+\midrule
+ACT multi-task + BC + simulation & \TODO{} / \TODO{} & \TODO{} \\
+$\pi_{0.5}$ multi-task + BC + simulation & \TODO{} / \TODO{} & \TODO{} \\
+$\pi_{0.5}+\mathrm{Ego}$ multi-task & \TODO{} / \TODO{} & \TODO{} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{Controlled perturbation recovery.}
+Nominal success does not by itself demonstrate recovery: a policy may succeed
+more often simply because it makes fewer initial errors. We therefore perform a
+separate perturbation evaluation using matched initial-condition seeds and the
+trained multi-task checkpoints. Three standardized interventions are applied
+where relevant: (i) \emph{object displacement}, in which the target cube is
+moved laterally by $\TODO{}\,\mathrm{cm}$ after the arm begins its approach but
+before the first grasp; (ii) \emph{post-grasp displacement}, in which a
+successfully lifted cube is placed back on the workspace at a nearby reachable
+pose, forcing the policy to reacquire it; and (iii) \emph{drawer reset}, in
+which an opened drawer is moved $\TODO{}\,\mathrm{cm}$ toward the closed
+position before the next subtask. Each perturbation is applied at a predefined
+event rather than at a fixed wall-clock time.
+
+The primary robustness comparison applies identical perturbations to the
+seven-task ACT and $\pi_{0.5}$ real+simulation policies. We additionally report
+the $\pi_{0.5}+\mathrm{Ego}$ checkpoint as an exploratory condition. Recovery
+success is defined as completion of the original instruction after the
+intervention without human assistance; the recovery gap is the difference from
+the matched unperturbed completion rate.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Controlled perturbation recovery. Values are complete task-success
+rates (\%) after intervention; the unperturbed column uses matched rollout
+initializations. ACT and $\pi_{0.5}$ form the primary descriptive comparison;
+$\pi_{0.5}+\mathrm{Ego}$ is exploratory.}
+\label{tab:perturbation}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+Policy & Unperturbed & Object displacement &
+Post-grasp displacement & Drawer reset \\
+\midrule
+ACT multi-task + BC + simulation
+& \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}$ multi-task + BC + simulation
+& \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+$\pi_{0.5}+\mathrm{Ego}$ multi-task
+& \TODO{} & \TODO{} & \TODO{} & \TODO{} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{Qualitative observations.}
+The main observed failure modes are missed grasps, incorrect object selection,
+unstable placement, failed handovers, drawer-interaction errors, and loss of
+visual contact caused by occlusion. We record representative recovery and
+non-recovery cases from the controlled perturbation suite, but use the
+quantitative perturbation metric rather than isolated examples to support
+claims about recovery. Validation MSE is used for checkpoint selection and
+reported as a training diagnostic, but it is not interpreted as a direct
+measure of closed-loop task completion.
+
+\section{Future Work}
+\label{sec:future_work}
+
+Future experiments should test additional robot embodiments, workspaces,
+objects, and instructions, and should include learning curves over real-robot,
+simulation, and egocentric-data scale. An initialization- and action-space-
+matched control would help separate the effect of VLA pretraining from the
+other differences between ACT and $\pi_{0.5}$. Additional data-source controls
+---for example, replacing the human-data fraction with an equal amount of new
+simulated or real-robot data---would further clarify whether any observed gain
+is specific to human cross-embodiment experience or to additional
+distributional diversity.
+
+The existing MuJoCo environments also make reinforcement-learning fine-tuning a
+natural extension. Starting from the imitation-learned ACT or $\pi_{0.5}$
+checkpoints, simulated rollouts could expose the policy to off-demonstration
+states and optimize task completion or recovery objectives directly. Such an
+experiment would need to control reward design, exploration, and the
+sim-to-real gap carefully, and is therefore left outside the present ablation
+study.
+
+A complementary direction is recovery-focused data collection. RaC (Recovery
+and Correction) fine-tunes an imitation policy on human-in-the-loop
+intervention trajectories in which an operator first moves the robot back
+toward a familiar state and then demonstrates a corrective segment
+~\cite{hu2025rac}. This is particularly relevant to the present platform because the
+perturbation suite already identifies missed grasps, displaced objects, and
+drawer-state errors that can be converted into targeted recovery examples.
+Combining the present nominal demonstrations with RaC-style recovery and
+correction data is therefore a concrete future experiment for improving
+closed-loop robustness on Task~7 and the shorter manipulation tasks.
+
+A hierarchical system combining slower semantic planning with a compact,
+high-frequency controller is another direction, but is outside the scope of the
+present experiments.
+
+\section{Limitations}
+\label{sec:limitations}
+
+The study is intentionally small and its conclusions should be read within that
+scope. First, all physical experiments use one custom robot, one workspace, the
+same four camera placements, seven trained manipulation tasks, and one held-out
+shape-sorting task. Performance on a single held-out instruction does not
+establish broad zero-shot task generalization, open-world robustness, or
+transfer to a second robot embodiment. The term ``generalist'' is therefore used only in the
+restricted sense defined in
+Sec.~\ref{sec:study-design}.
+
+Second, the ACT--$\pi_{0.5}$ comparison is not an architecture ablation. The two
+systems differ in pretraining, parameter count, visual-language representation,
+task conditioning, and low-level action parameterization. The parallel ACT and
+$\pi_{0.5}$ simulation and task-diversity ablations make it possible to compare
+within-family effect sizes, but a difference between those effect sizes still
+does not identify a single causal mechanism such as pretraining alone.
+The held-out-task comparison retains this system-level interpretation: ACT uses
+the trained T3 sorting-task ID, whereas $\pi_{0.5}$ receives the new
+natural-language instruction.
+
+Third, the simulation ablation compares simulated trajectories against repeated
+exposure to a fixed real dataset; it does not show that simulation is preferable
+to collecting an equal amount of new real-robot data. The specialist--multi-task
+comparison tests shared training and parameter sharing as a package and cannot
+fully separate representation sharing, regularization, task conditioning, or
+optimization effects.
+
+Fourth, the egocentric-data experiment is specific to $\pi_{0.5}$ and uses
+pseudo-actions derived from RGB-D hand tracking rather than robot joint labels.
+MediaPipe landmark error, RealSense depth noise, self-occlusion, camera
+ego-motion estimation, and the approximation of a human hand by a 6-DoF
+end-effector frame all introduce supervision noise. Human gripper actions are
+not directly supervised. A performance difference therefore indicates an
+effect of the chosen human-data co-training recipe, not proof that human
+embodiment data will transfer in general. Because standard ACT is not trained
+with the same human pseudo-action interface, the ego-data condition does not
+provide an ACT--$\pi_{0.5}$ comparison.
+
+Finally, Tasks~1--6 last roughly 10\,s and Task~7 roughly 20\,s. Task~7 is
+longer within this benchmark but remains short compared with many household
+or industrial long-horizon problems. Confidence intervals over physical
+rollouts quantify rollout uncertainty, but unless several independently trained
+seeds are evaluated they do not capture all training-run variance. The
+controlled perturbations test a small set of predefined disturbances and should
+not be interpreted as general self-correction capability. These limitations
+motivate treating the results as evidence about this benchmark and experimental
+regime rather than broad claims about general-purpose robot learning.
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented a small-scale study of model choice, simulation, task diversity,
+and egocentric human supervision on a low-cost fixed-base bimanual robot with
+12 actuated DoF: ten arm-joint DoF and two gripper DoF. The experimental design
+mirrors the simulation and multi-task ablations
+within both ACT and $\pi_{0.5}$, allowing the effect of these training changes
+to be measured separately for each policy family while keeping direct
+ACT--$\pi_{0.5}$ comparisons descriptive. Egocentric RGB-D human data are
+evaluated only for $\pi_{0.5}$ through a cross-embodiment end-effector
+representation, and recovery is measured using explicit perturbations rather
+than inferred from nominal success. The results should be interpreted only for
+the robot embodiment and benchmark described here. \TODO{Insert the final
+numerical findings using benchmark-specific language; report the within-ACT and
+within-$\pi_{0.5}$ simulation and multi-task effect sizes, the ego-data effect,
+the held-out-task result, and perturbation recovery with uncertainty, without
+extrapolating beyond the tested tasks, data mixture, and compute budget.}
+
+\section*{Reproducibility Statement}
+
+The complete software stack for the custom bimanual platform is available at
+\url{https://github.com/tmeynier/bimanual-models-tasks-data}. The repository includes the calibration,
+demonstration-recording, policy-training, inference, and evaluation code,
+together with the robot CAD files and MuJoCo simulation environment.
+
+The arms use Feetech STS3215 servomotors, following the widely available
+LeRobot SO-101 configuration. These motors and their controllers can be
+purchased from standard online robotics suppliers. The platform consists of
+the two fixed manipulation arms and their controllers. The released hardware
+description also includes the fixed-head D415 mount, fixed body-camera mount,
+and left/right wrist-camera mounts, together with the camera calibration used
+to reproduce the corresponding MuJoCo viewpoints.
+
+Datasets and trained checkpoints will be released through
+\url{https://huggingface.co/tmeynier} under the following names:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Datasets:}
+    \texttt{bimanual-real-bc},
+    \texttt{bimanual-mujoco-sim}, and
+    \texttt{bimanual-egocentric}.
+
+    \item \textbf{Model checkpoints:}
+    \texttt{bimanual-act-bc-1task},
+    \texttt{bimanual-act-bc-sim-1task},
+    \texttt{bimanual-act-bc-sim-task1} through
+    \texttt{bimanual-act-bc-sim-task7},
+    \texttt{bimanual-act-bc-sim-7task},
+    \texttt{bimanual-pi05-bc-1task},
+    \texttt{bimanual-pi05-bc-sim-1task},
+    \texttt{bimanual-pi05-bc-sim-task1} through
+    \texttt{bimanual-pi05-bc-sim-task7},
+    \texttt{bimanual-pi05-bc-sim-7task}, and
+    \texttt{bimanual-pi05-ego-7task}.
+\end{itemize}
+
+These releases include the training configurations, dataset metadata,
+evaluation seeds, selected checkpoints, and per-rollout results required to
+reproduce the experiments.
+
+\appendix
+
+\section{Simulation Randomization Parameters}
+\label{app:sim-randomization}
+
+Table~\ref{tab:sim-randomization} reports the parameters and sampling ranges
+used to generate the simulated demonstrations.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Domain-randomization parameters used in MuJoCo.}
+\label{tab:sim-randomization}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Parameter & Distribution & Range \\
+\midrule
+Object position     & Uniform & \TODO{} \\
+Object orientation  & Uniform & \TODO{} \\
+Camera pose         & Fixed & Matched to real camera mounts \\
+Lighting            & Uniform & \TODO{} \\
+Object mass         & Uniform & \TODO{} \\
+Contact friction    & Uniform & \TODO{} \\
+Action noise        & Gaussian & \TODO{} \\
+Control delay       & Uniform & \TODO{} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Minimum Reporting Checklist}
+\begin{itemize}[leftmargin=*]
+    \item Exact 12-DoF accounting: five kinematic arm joints plus one normalized
+    gripper actuator per side, including the associated low-level controllers.
+    \item Intrinsics/extrinsics and resolution for the fixed head, fixed body,
+    left-wrist, and right-wrist cameras; confirmation that D415 depth is excluded
+    from robot-policy input; observation history, action representation, chunk
+    horizon, and execution horizon.
+    \item Dataset episodes, hours, task/source composition, failure retention,
+    train/validation/test splitting unit, and licenses/consent.
+    \item Parameter counts, pretrained checkpoint, trainable layers, optimizer,
+    updates, compute, seeds, and checkpoint selection.
+    \item Per-task rollout counts, initial-condition seeds, randomization ranges,
+    success predicates, timeouts, interventions, and safety rules.
+    \item Raw per-rollout outcomes and confidence intervals, not only averages.
+    \item Training seeds and matched optimization budgets for the ACT and
+    $\pi_{0.5}$ simulation and task-diversity ablations.
+    \item Egocentric RGB-D preprocessing details, MediaPipe confidence thresholds,
+    depth filtering, camera-motion compensation, end-effector construction, and
+    masked human action channels.
+    \item Exact perturbation magnitudes, trigger events, applicable tasks, and
+    recovery-success criteria.
+\end{itemize}
+
+\section{Suggested Supplementary Figures and Videos}
+\begin{enumerate}[leftmargin=*]
+    \item CAD-to-physical robot overview with the kinematic tree, all axes, and
+    the four real/sim camera viewpoints.
+    \item Dataset examples from real BC, simulation, and egocentric RGB-D human
+    video, including MediaPipe 3D hand tracks and the derived end-effector frame.
+    \item One paired rollout per ablation under the same initial-condition seed.
+    \item Recovery-suite rollouts showing object displacement and grasp failure.
+    \item Failure taxonomy and latency distribution on deployment hardware.
+\end{enumerate}
+
+\begin{thebibliography}{9}
+
+\bibitem{ross2011dagger}
+S.~Ross, G.~Gordon, and D.~Bagnell,
+``A Reduction of Imitation Learning and Structured Prediction to No-Regret
+Online Learning,'' in \emph{Proc. AISTATS}, 2011.
+
+\bibitem{zhao2023act}
+T.~Z. Zhao, V.~Kumar, S.~Levine, and C.~Finn,
+``Learning Fine-Grained Bimanual Manipulation with Low-Cost Hardware,''
+in \emph{Proc. Robotics: Science and Systems}, 2023.
+
+\bibitem{chi2023diffusion}
+C.~Chi, Z.~Xu, S.~Feng, E.~Cousineau, Y.~Du, B.~Burchfiel, R.~Tedrake,
+and S.~Song,
+``Diffusion Policy: Visuomotor Policy Learning via Action Diffusion,''
+in \emph{Proc. Robotics: Science and Systems}, 2023.
+
+\bibitem{lipman2023flow}
+Y.~Lipman, R.~T. Q. Chen, H.~Ben-Hamu, M.~Nickel, and M.~Le,
+``Flow Matching for Generative Modeling,''
+in \emph{Proc. International Conference on Learning Representations}, 2023.
+
+\bibitem{black2024pi0}
+K.~Black et al.,
+``$\pi_0$: A Vision-Language-Action Flow Model for General Robot Control,''
+\emph{arXiv preprint arXiv:2410.24164}, 2024.
+
+\bibitem{openx2023}
+Open X-Embodiment Collaboration et al.,
+``Open X-Embodiment: Robotic Learning Datasets and RT-X Models,''
+\emph{arXiv preprint arXiv:2310.08864}, 2023.
+
+\bibitem{black2025pi05}
+K.~Black et al.,
+``$\pi_{0.5}$: A Vision-Language-Action Model with Open-World
+Generalization,''
+\emph{arXiv preprint arXiv:2504.16054}, 2025.
+
+\bibitem{lecun2022path}
+Y.~LeCun,
+``A Path Towards Autonomous Machine Intelligence,''
+\emph{OpenReview}, 2022.
+
+\bibitem{assran2025vjepa2}
+M.~Assran et al.,
+``V-JEPA~2: Self-Supervised Video Models Enable Understanding,
+Prediction and Planning,''
+\emph{arXiv preprint arXiv:2506.09985}, 2025.
+
+\bibitem{kareer2025humanrobot}
+S.~Kareer, K.~Pertsch, J.~Darpinian, J.~Hoffman, D.~Xu, S.~Levine,
+C.~Finn, and S.~Nair,
+``Emergence of Human to Robot Transfer in Vision-Language-Action Models,''
+\emph{arXiv preprint arXiv:2512.22414}, 2025.
+
+\bibitem{zheng2026egoscale}
+R.~Zheng et al.,
+``EgoScale: Scaling Dexterous Manipulation with Diverse Egocentric Human
+Data,''
+\emph{arXiv preprint arXiv:2602.16710}, 2026.
+
+\bibitem{figure2026index}
+Figure AI,
+``Introducing Index: Building the World's Largest and Most Diverse Physical
+Dataset,'' 2026. [Online]. Available:
+\url{https://www.figure.ai/news/introducing-index}
+
+\bibitem{figure2026helix25}
+Figure AI,
+``Helix 2.5: Zero-Shot 30-Home Generalization,'' 2026. [Online]. Available:
+\url{https://www.figure.ai/news/helix-2-5-zero-shot-30-home-generalization}
+
+\bibitem{li2026egowam}
+B.~Li, X.~Yin, M.~Lin, Y.~Zhang, and D.~Xu,
+``EgoWAM: World Action Models Beyond Pixels with In-the-Wild Egocentric
+Human Data,''
+\emph{arXiv preprint arXiv:2607.08436}, 2026. [Online]. Available:
+\url{https://arxiv.org/abs/2607.08436}
+
+\bibitem{lerobotso101}
+Hugging Face,
+``LeRobot SO-101 Documentation,'' 2026. [Online]. Available:
+\url{https://huggingface.co/docs/lerobot/so101}
+
+
+\bibitem{beyer2024paligemma}
+L.~Beyer et al.,
+``PaliGemma: A Versatile 3B VLM for Transfer,''
+\emph{arXiv preprint arXiv:2407.07726}, 2024.
+
+\bibitem{pavlakos2024hamer}
+G.~Pavlakos, D.~Shan, I.~Radosavovic, A.~Kanazawa, D.~Fouhey, and J.~Malik,
+``Reconstructing Hands in 3D with Transformers,''
+in \emph{Proc. IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+2024.
+
+
+\bibitem{zhang2020mediapipehands}
+F.~Zhang, V.~Bazarevsky, A.~Vakunov, A.~Tkachenka, G.~Sung,
+C.-L.~Chang, and M.~Grundmann,
+``MediaPipe Hands: On-device Real-time Hand Tracking,''
+\emph{arXiv preprint arXiv:2006.10214}, 2020.
+
+\bibitem{hu2025rac}
+Z.~Hu, R.~Wu, N.~Enock, J.~Li, R.~Kadakia, Z.~Erickson, and A.~Kumar,
+``RaC: Robot Learning for Long-Horizon Tasks by Scaling Recovery and
+Correction,''
+\emph{arXiv preprint arXiv:2509.07953}, 2025.
+
+\end{thebibliography}
+
+\end{document}

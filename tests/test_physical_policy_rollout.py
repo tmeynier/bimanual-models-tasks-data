@@ -7,13 +7,14 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
-from hepha_lerobot.evaluation import physical_rollout
-from hepha_lerobot.evaluation.remote_policy_client import (
-    HephaRemotePolicyClient,
+from lerobot.utils.constants import ACTION, OBS_IMAGES, OBS_STATE
+
+from bimanual_robot.evaluation import physical_rollout
+from bimanual_robot.evaluation.remote_policy_client import (
+    RemotePolicyClient,
     build_remote_lerobot_features,
     require_loopback_server,
 )
-from lerobot.utils.constants import ACTION, OBS_IMAGES, OBS_STATE
 
 
 def _policy_config(
@@ -50,7 +51,7 @@ def test_physical_policy_schema_matches_recorded_dataset() -> None:
         (_policy_config(state_shape=(13,)), "observation.state"),
         (_policy_config(image_shape=(3, 480, 640)), "head_camera"),
         (_policy_config(action_shape=(13,)), "action"),
-        (_policy_config(policy_type="diffusion"), "ACT and PI0"),
+        (_policy_config(policy_type="unsupported"), "ACT and PI0.5"),
     ],
 )
 def test_physical_policy_schema_rejects_incompatible_checkpoint(config, message) -> None:
@@ -63,11 +64,11 @@ def test_physical_policy_schema_rejects_incompatible_checkpoint(config, message)
         )
 
 
-def test_pi0_schema_accepts_padded_state_and_saved_camera_rename() -> None:
+def test_pi05_schema_accepts_padded_state_and_saved_camera_rename() -> None:
     config = _policy_config(
         state_shape=(32,),
         image_shape=(3, 224, 224),
-        policy_type="pi0",
+        policy_type="pi05",
         camera_name="base_0_rgb",
     )
     preprocessor = SimpleNamespace(
@@ -89,11 +90,11 @@ def test_pi0_schema_accepts_padded_state_and_saved_camera_rename() -> None:
     )
 
 
-def test_pi0_schema_rejects_missing_saved_camera_rename() -> None:
+def test_pi05_schema_rejects_missing_saved_camera_rename() -> None:
     config = _policy_config(
         state_shape=(32,),
         image_shape=(3, 224, 224),
-        policy_type="pi0",
+        policy_type="pi05",
         camera_name="base_0_rgb",
     )
 
@@ -142,7 +143,7 @@ def test_physical_action_rejects_nonfinite_or_wrong_shape() -> None:
         physical_rollout.action_targets(invalid)
 
 
-def test_remote_transport_uses_pi0_camera_and_canonical_joint_order() -> None:
+def test_remote_transport_uses_pi05_camera_and_canonical_joint_order() -> None:
     features = build_remote_lerobot_features(
         physical_rollout.CANONICAL_JOINTS,
         camera_name="base_0_rgb",
@@ -164,9 +165,9 @@ def test_remote_transport_requires_ssh_loopback_tunnel() -> None:
 
 
 def test_remote_raw_observation_uses_server_camera_name() -> None:
-    client = HephaRemotePolicyClient(
+    client = RemotePolicyClient(
         server_address="127.0.0.1:8080",
-        policy_type="pi0",
+        policy_type="pi05",
         policy_path="model",
         policy_device="cuda",
         actions_per_chunk=10,
@@ -232,9 +233,9 @@ def test_remote_client_uses_lerobot_grpc_protocol() -> None:
     except RuntimeError as exc:
         pytest.skip(f"Loopback sockets are unavailable in this sandbox: {exc}")
     server.start()
-    client = HephaRemotePolicyClient(
+    client = RemotePolicyClient(
         server_address=f"127.0.0.1:{port}",
-        policy_type="pi0",
+        policy_type="pi05",
         policy_path="remote-model",
         policy_device="cuda",
         actions_per_chunk=3,

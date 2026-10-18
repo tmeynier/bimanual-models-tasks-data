@@ -165,7 +165,7 @@ def read_camera(args: argparse.Namespace) -> int:
         index = args.index
 
     capture = open_camera(index, width=args.width, height=args.height, fps=args.fps)
-    window_name = f"Hepha USB camera {index}"
+    window_name = f"Bimanual robot USB camera {index}"
     frames = 0
     report_started = time.monotonic()
     report_frames = 0

@@ -1,4 +1,4 @@
-"""Canonical Hepha servo-to-joint definitions shared by hardware utilities."""
+"""Canonical bimanual robot servo-to-joint definitions shared by hardware utilities."""
 
 from __future__ import annotations
 

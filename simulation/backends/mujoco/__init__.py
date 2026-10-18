@@ -1,4 +1,4 @@
-"""MuJoCo implementation of the Hepha simulation backend contract."""
+"""MuJoCo implementation of the bimanual robot simulation backend contract."""
 
 from .backend import ACTUATOR_NAMES, MujocoBackend
 

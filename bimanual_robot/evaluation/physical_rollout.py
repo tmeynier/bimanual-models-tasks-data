@@ -1,0 +1,581 @@
+"""Run a trained LeRobot ACT or PI0.5 policy on the calibrated physical follower."""
+
+from __future__ import annotations
+
+import argparse
+import math
+import signal
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+import cv2
+import numpy as np
+import torch
+from lerobot.policies.utils import prepare_observation_for_inference
+from lerobot.utils.constants import ACTION, OBS_IMAGES, OBS_STATE
+
+from bimanual_robot.evaluation.policy import load_policy
+from bimanual_robot.evaluation.remote_policy_client import RemotePolicyClient
+from bimanual_robot.recording.physical_teleop import (
+    RecordingInterface,
+    camera_frame,
+    positive_float,
+    positive_integer,
+)
+from bimanual_robot.training.train import resolve_device
+from hardware.axes import AXES
+from hardware.feetech_follower import FeetechFollower
+from hardware.read_feetech_positions import nonnegative_integer
+from hardware.read_usb_camera import open_camera, read_first_frame
+from hardware.teleoperate_feetech import JointSafetyLimiter, bounded_integer
+
+CANONICAL_JOINTS = tuple(AXES[servo_id].joint_name for servo_id in sorted(AXES))
+DEFAULT_TASK = "Teleoperate the bimanual robot"
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--policy-path",
+        required=True,
+        help="Local pretrained_model directory or Hugging Face model repo ID.",
+    )
+    parser.add_argument(
+        "--follower-calibration",
+        type=Path,
+        default=Path("hardware/feetech_follower_calibration.json"),
+    )
+    parser.add_argument("--follower-port")
+    parser.add_argument("--camera-index", type=nonnegative_integer, default=0)
+    parser.add_argument("--camera-name", default="head_camera")
+    parser.add_argument("--width", type=positive_integer, default=256)
+    parser.add_argument("--height", type=positive_integer, default=256)
+    parser.add_argument("--fps", type=positive_integer, default=30)
+    parser.add_argument(
+        "--duration-seconds",
+        type=float,
+        default=0.0,
+        help="Stop after this duration; zero runs until Q, Escape, or Ctrl+C.",
+    )
+    parser.add_argument("--task", default=DEFAULT_TASK)
+    parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--remote-server",
+        help=(
+            "LeRobot policy-server endpoint through an SSH tunnel, normally "
+            "127.0.0.1:8080. Omit for local inference."
+        ),
+    )
+    parser.add_argument(
+        "--remote-policy-type",
+        choices=("act", "pi05"),
+        default="pi05",
+        help="Policy type loaded by the remote LeRobot server.",
+    )
+    parser.add_argument(
+        "--remote-policy-device",
+        default="cuda",
+        help="Inference device on the remote server (default: cuda).",
+    )
+    parser.add_argument(
+        "--remote-camera-name",
+        help="Camera feature sent to the server; defaults to base_0_rgb for PI0.5.",
+    )
+    parser.add_argument("--remote-connect-timeout", type=positive_float, default=15.0)
+    parser.add_argument(
+        "--remote-load-timeout",
+        type=positive_float,
+        default=300.0,
+        help="Maximum seconds for the server to load the policy.",
+    )
+    parser.add_argument(
+        "--remote-request-timeout",
+        type=positive_float,
+        default=10.0,
+        help="Maximum seconds for one remote observation/action request.",
+    )
+    parser.add_argument(
+        "--remote-prefetch-threshold",
+        type=float,
+        default=0.5,
+        help="Request the next chunk when this fraction of the current chunk remains.",
+    )
+    parser.add_argument(
+        "--n-action-steps",
+        type=positive_integer,
+        default=None,
+        help="Override actions consumed from each policy chunk before replanning.",
+    )
+    parser.add_argument(
+        "--temporal-ensemble-coeff",
+        type=float,
+        default=None,
+        help="Optional ACT temporal ensembling; requires --n-action-steps 1.",
+    )
+    parser.add_argument(
+        "--max-velocity-deg",
+        type=positive_float,
+        default=10.0,
+        help="Maximum commanded joint velocity in degrees/s (default: 10).",
+    )
+    parser.add_argument("--acceleration", type=bounded_integer(0, 254), default=30)
+    parser.add_argument("--torque-limit", type=bounded_integer(0, 1000), default=300)
+    parser.add_argument("--retries", type=nonnegative_integer, default=2)
+    parser.add_argument(
+        "--watchdog-seconds",
+        type=positive_float,
+        default=2.0,
+        help="Disable torque if one camera/inference/control cycle exceeds this time.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Keep follower torque disabled and display policy predictions only.",
+    )
+    parser.add_argument(
+        "--preview",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--preview-width", type=positive_integer, default=1280)
+    parser.add_argument("--preview-height", type=positive_integer, default=720)
+    parser.add_argument(
+        "--preview-fullscreen",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    return parser.parse_args(argv)
+
+
+def _policy_reference(value: str) -> str | Path:
+    local = Path(value).expanduser()
+    return local.resolve() if local.exists() else value
+
+
+def _feature_shape(features: dict[str, Any] | None, key: str) -> tuple[int, ...] | None:
+    if not features or key not in features:
+        return None
+    return tuple(int(value) for value in features[key].shape)
+
+
+def _processed_observation_key(preprocessor: Any | None, raw_key: str) -> str:
+    """Apply the saved LeRobot observation-key renames without processing tensors."""
+    key = raw_key
+    for step in getattr(preprocessor, "steps", ()):
+        rename_map = getattr(step, "rename_map", None)
+        if rename_map:
+            key = rename_map.get(key, key)
+    return key
+
+
+def validate_physical_policy_features(
+    policy_config: Any,
+    *,
+    preprocessor: Any | None = None,
+    camera_name: str,
+    width: int,
+    height: int,
+    joint_count: int = len(CANONICAL_JOINTS),
+) -> None:
+    """Reject checkpoints whose physical input/output schema cannot match the recorder."""
+    if policy_config.type not in {"act", "pi05"}:
+        raise ValueError(
+            "Physical rollout supports official LeRobot ACT and PI0.5 policies, not "
+            f"{policy_config.type!r}."
+        )
+    state_shape = _feature_shape(policy_config.input_features, OBS_STATE)
+    accepted_state_shapes = {(joint_count,)}
+    if policy_config.type == "pi05":
+        # The pretrained PI0.5 configuration keeps its padded 32-D state schema.
+        # PI0.5 pads the 12 physical bimanual robot joints internally.
+        accepted_state_shapes.add((int(policy_config.max_state_dim),))
+    if state_shape not in accepted_state_shapes:
+        raise ValueError(
+            f"Policy expects {OBS_STATE} shape {state_shape}; physical bimanual robot requires "
+            f"{sorted(accepted_state_shapes)}."
+        )
+    raw_image_key = f"{OBS_IMAGES}.{camera_name}"
+    policy_image_key = _processed_observation_key(preprocessor, raw_image_key)
+    image_shape = _feature_shape(policy_config.input_features, policy_image_key)
+    if image_shape is None:
+        raise ValueError(
+            f"The saved preprocessor maps physical camera {raw_image_key!r} to "
+            f"{policy_image_key!r}, but that key is absent from the policy inputs."
+        )
+    if policy_config.type == "act":
+        accepted_image_shapes = {(3, height, width), (height, width, 3)}
+        if image_shape not in accepted_image_shapes:
+            raise ValueError(
+                f"Policy expects {policy_image_key} shape {image_shape}; this rollout "
+                f"supplies RGB {width}x{height}."
+            )
+    elif len(image_shape) != 3:
+        raise ValueError(
+            f"PI0.5 expects {policy_image_key} shape {image_shape}; a three-dimensional "
+            "RGB visual feature is required."
+        )
+    action_shape = _feature_shape(policy_config.output_features, ACTION)
+    if action_shape != (joint_count,):
+        raise ValueError(
+            f"Policy produces {ACTION} shape {action_shape}; physical bimanual robot requires "
+            f"({joint_count},)."
+        )
+
+
+def build_physical_policy_observation(
+    positions: dict[str, float],
+    rgb: np.ndarray,
+    *,
+    camera_name: str,
+    joints: tuple[str, ...] = CANONICAL_JOINTS,
+) -> dict[str, np.ndarray]:
+    missing = sorted(set(joints) - set(positions))
+    if missing:
+        raise ValueError(f"Follower observation is missing joints: {missing}")
+    if rgb.dtype != np.uint8 or rgb.ndim != 3 or rgb.shape[-1] != 3:
+        raise ValueError("Physical camera observation must be HWC uint8 RGB.")
+    return {
+        OBS_STATE: np.asarray([positions[joint] for joint in joints], dtype=np.float32),
+        f"{OBS_IMAGES}.{camera_name}": rgb,
+    }
+
+
+def action_targets(
+    action: torch.Tensor | np.ndarray,
+    *,
+    joints: tuple[str, ...] = CANONICAL_JOINTS,
+) -> dict[str, float]:
+    if isinstance(action, torch.Tensor):
+        values = action.squeeze(0).detach().cpu().numpy()
+    else:
+        values = np.asarray(action).squeeze()
+    if values.shape != (len(joints),):
+        raise ValueError(f"Policy returned action shape {values.shape}; expected ({len(joints)},).")
+    if not np.isfinite(values).all():
+        raise RuntimeError("Policy returned a non-finite physical joint target.")
+    return {joint: float(value) for joint, value in zip(joints, values, strict=True)}
+
+
+def reset_policy_state(policy: Any, preprocessor: Any, postprocessor: Any) -> None:
+    policy.reset()
+    preprocessor.reset()
+    postprocessor.reset()
+
+
+def predict_targets(
+    *,
+    policy: Any,
+    preprocessor: Any,
+    postprocessor: Any,
+    positions: dict[str, float],
+    rgb: np.ndarray,
+    camera_name: str,
+    device: str,
+    task: str,
+) -> dict[str, float]:
+    observation = build_physical_policy_observation(
+        positions,
+        rgb,
+        camera_name=camera_name,
+    )
+    batch = prepare_observation_for_inference(
+        observation,
+        torch.device(device),
+        task=task,
+        robot_type="bimanual_physical_feetech",
+    )
+    with torch.inference_mode():
+        batch = preprocessor(batch)
+        action = postprocessor(policy.select_action(batch))
+    return action_targets(action)
+
+
+def _maximum_error_degrees(first: dict[str, float], second: dict[str, float]) -> float:
+    return max(math.degrees(abs(first[joint] - second[joint])) for joint in CANONICAL_JOINTS)
+
+
+def run_physical_rollout(args: argparse.Namespace) -> None:
+    if args.duration_seconds < 0:
+        raise ValueError("--duration-seconds cannot be negative")
+    if not args.camera_name:
+        raise ValueError("--camera-name cannot be empty")
+    if not 0.0 <= args.remote_prefetch_threshold <= 1.0:
+        raise ValueError("--remote-prefetch-threshold must be between 0 and 1")
+    if args.remote_server and args.temporal_ensemble_coeff is not None:
+        raise ValueError("Remote rollout does not support ACT temporal ensembling")
+
+    remote_client: RemotePolicyClient | None = None
+    capture = None
+    try:
+        if args.remote_server:
+            actions_per_chunk = args.n_action_steps or 10
+            remote_camera_name = args.remote_camera_name or (
+                "base_0_rgb" if args.remote_policy_type == "pi05" else args.camera_name
+            )
+            policy_label = (
+                "PI0.5"
+                if args.remote_policy_type == "pi05"
+                else args.remote_policy_type.upper()
+            )
+            remote_client = RemotePolicyClient(
+                server_address=args.remote_server,
+                policy_type=args.remote_policy_type,
+                policy_path=args.policy_path,
+                policy_device=args.remote_policy_device,
+                actions_per_chunk=actions_per_chunk,
+                prefetch_threshold=args.remote_prefetch_threshold,
+                camera_name=remote_camera_name,
+                width=args.width,
+                height=args.height,
+                joints=CANONICAL_JOINTS,
+                connect_timeout=args.remote_connect_timeout,
+                load_timeout=args.remote_load_timeout,
+                request_timeout=args.remote_request_timeout,
+            )
+            print(
+                f"Connecting to trusted LeRobot policy server at {args.remote_server}; "
+                f"the server will load {args.policy_path} on {args.remote_policy_device}..."
+            )
+            load_seconds = remote_client.connect()
+            print(
+                f"Remote {policy_label} ready in {load_seconds:.1f} s: "
+                f"actions_per_chunk={actions_per_chunk}, camera={remote_camera_name}, "
+                f"joints={len(CANONICAL_JOINTS)}"
+            )
+            device = "remote"
+            policy = policy_config = preprocessor = postprocessor = None
+        else:
+            device = resolve_device(args.device)
+            policy_ref = _policy_reference(args.policy_path)
+            print(f"Loading policy {args.policy_path} on {device} before connecting hardware...")
+            policy, policy_config, preprocessor, postprocessor = load_policy(
+                policy_ref,
+                device,
+                n_action_steps=args.n_action_steps,
+                temporal_ensemble_coeff=args.temporal_ensemble_coeff,
+            )
+            validate_physical_policy_features(
+                policy_config,
+                preprocessor=preprocessor,
+                camera_name=args.camera_name,
+                width=args.width,
+                height=args.height,
+            )
+            policy_label = (
+                "PI0.5" if policy_config.type == "pi05" else policy_config.type.upper()
+            )
+            print(
+                f"{policy_label} policy ready: "
+                f"chunk_size={policy_config.chunk_size}, "
+                f"n_action_steps={policy_config.n_action_steps}, "
+                f"camera={args.camera_name}, joints={len(CANONICAL_JOINTS)}"
+            )
+
+        follower = FeetechFollower(
+            calibration_path=args.follower_calibration,
+            joint_names=CANONICAL_JOINTS,
+            port=args.follower_port,
+            retries=args.retries,
+        )
+        capture = open_camera(
+            args.camera_index,
+            width=args.width,
+            height=args.height,
+            fps=args.fps,
+        )
+        first_frame = read_first_frame(capture)
+        interface = RecordingInterface(
+            capture=capture,
+            window_name=(
+                f"Bimanual robot {policy_label} physical rollout "
+                f"camera {args.camera_index}"
+            ),
+            record_width=args.width,
+            record_height=args.height,
+            preview_width=args.preview_width,
+            preview_height=args.preview_height,
+            enabled=args.preview,
+            fullscreen=args.preview_fullscreen,
+        )
+        interface.open(first_frame)
+
+        with follower:
+            if follower.joint_names != CANONICAL_JOINTS:
+                raise RuntimeError(
+                    "Follower calibration joint order does not match the physical training "
+                    f"dataset: {follower.joint_names}"
+                )
+            interface.confirm(
+                title="Support the follower arms",
+                message="Support both arms. SPACE disables torque for the policy check.",
+            )
+            follower.disable_torque()
+            positions = follower.read_joint_positions()
+            preview, rgb = camera_frame(capture, width=args.width, height=args.height)
+            warmup_started = time.perf_counter()
+            if remote_client is not None:
+                remote_client.reset()
+                warmup_action, _ = remote_client.predict_once(positions, rgb, args.task)
+                warmup_targets = action_targets(warmup_action)
+            else:
+                reset_policy_state(policy, preprocessor, postprocessor)
+                warmup_targets = predict_targets(
+                    policy=policy,
+                    preprocessor=preprocessor,
+                    postprocessor=postprocessor,
+                    positions=positions,
+                    rgb=rgb,
+                    camera_name=args.camera_name,
+                    device=device,
+                    task=args.task,
+                )
+            warmup_seconds = time.perf_counter() - warmup_started
+            initial_error = _maximum_error_degrees(warmup_targets, positions)
+            print(
+                f"Torque-disabled policy check completed in {warmup_seconds * 1000:.1f} ms; "
+                f"largest raw target change is {initial_error:.1f} degrees."
+            )
+
+            limits = {
+                axis.joint_name: (
+                    float(axis.calibration["q_min"]),
+                    float(axis.calibration["q_max"]),
+                )
+                for axis in follower.axes
+            }
+            limiter = JointSafetyLimiter(
+                limits=limits,
+                max_velocity=math.radians(args.max_velocity_deg),
+                previous=positions.copy(),
+            )
+
+            if args.dry_run:
+                print(
+                    "DRY RUN: follower torque remains disabled. Support the unpowered arms. "
+                    "Press Q, Escape, or Ctrl+C to stop."
+                )
+            else:
+                interface.confirm(
+                    title=f"{policy_label} rollout safety confirmation",
+                    message=(
+                        "Clear the workspace and keep power removal ready. "
+                        "SPACE enables follower torque."
+                    ),
+                )
+                follower.configure_runtime(
+                    acceleration=args.acceleration,
+                    torque_limit=args.torque_limit,
+                )
+                positions = follower.seed_goals_from_present_position()
+                limiter.previous = positions.copy()
+                follower.enable_torque()
+                print(
+                    "Follower torque enabled. "
+                    f"Velocity limit={args.max_velocity_deg:.1f} deg/s, "
+                    f"torque limit={args.torque_limit}."
+                )
+
+            if remote_client is not None:
+                remote_client.reset()
+            else:
+                reset_policy_state(policy, preprocessor, postprocessor)
+            period = 1.0 / args.fps
+            started_at = time.monotonic()
+            last_tick = started_at
+            previous_status_width = 0
+            while (
+                args.duration_seconds == 0 or time.monotonic() - started_at < args.duration_seconds
+            ):
+                cycle_started = time.monotonic()
+                dt = min(max(0.0, cycle_started - last_tick), 2.0 * period)
+                last_tick = cycle_started
+                positions = follower.read_joint_positions()
+                preview, rgb = camera_frame(capture, width=args.width, height=args.height)
+                remote_wait = 0.0
+                remote_queue = 0
+                if remote_client is not None:
+                    remote_action, remote_wait, remote_queue = remote_client.next_action(
+                        positions,
+                        rgb,
+                        args.task,
+                    )
+                    requested = action_targets(remote_action)
+                else:
+                    requested = predict_targets(
+                        policy=policy,
+                        preprocessor=preprocessor,
+                        postprocessor=postprocessor,
+                        positions=positions,
+                        rgb=rgb,
+                        camera_name=args.camera_name,
+                        device=device,
+                        task=args.task,
+                    )
+                if args.dry_run:
+                    limiter.previous = positions.copy()
+                commanded = limiter.apply(requested, dt)
+                if not args.dry_run:
+                    follower.write_joint_positions(commanded)
+
+                cycle_seconds = time.monotonic() - cycle_started
+                if cycle_seconds > args.watchdog_seconds:
+                    raise RuntimeError(
+                        f"Physical rollout watchdog expired: one cycle took "
+                        f"{cycle_seconds:.3f} s (limit {args.watchdog_seconds:.3f} s)."
+                    )
+                target_error = _maximum_error_degrees(requested, positions)
+                command_step = _maximum_error_degrees(commanded, positions)
+                mode = "DRY RUN" if args.dry_run else "ACTIVE"
+                status = (
+                    f"{mode} | cycle={cycle_seconds * 1000:6.1f} ms | "
+                    f"policy delta={target_error:6.1f} deg | "
+                    f"safe step={command_step:5.2f} deg"
+                )
+                if remote_client is not None:
+                    status += (
+                        f" | remote wait={remote_wait * 1000:6.1f} ms | queue={remote_queue:2d}"
+                    )
+                print(f"\r{status:<{previous_status_width}}", end="", flush=True)
+                previous_status_width = max(previous_status_width, len(status))
+                action = interface.present(
+                    preview,
+                    title=f"Bimanual robot {policy_label} rollout — {mode}",
+                    message=(
+                        f"Cycle {cycle_seconds * 1000:.0f} ms | "
+                        f"policy delta {target_error:.1f} deg | "
+                        f"safe step {command_step:.2f} deg"
+                    ),
+                    controls="Q / ESC: stop and disable follower torque",
+                    recording=not args.dry_run,
+                )
+                if action == "quit":
+                    break
+                time.sleep(max(0.0, period - (time.monotonic() - cycle_started)))
+            print()
+    finally:
+        if remote_client is not None:
+            remote_client.close()
+        if capture is not None:
+            capture.release()
+        cv2.destroyAllWindows()
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        run_physical_rollout(args)
+    except KeyboardInterrupt:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        print("\nStopped. Follower torque was disabled.")
+        return 130
+    except Exception as exc:
+        print(f"\nPhysical policy rollout failed: {exc}", file=sys.stderr)
+        return 1
+    print("Physical policy rollout stopped. Follower torque was disabled.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

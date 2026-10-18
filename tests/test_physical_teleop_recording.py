@@ -3,9 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
-from hepha_lerobot.recording import physical_teleop
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.feature_utils import combine_feature_dicts, hw_to_dataset_features
+
+from bimanual_robot.recording import physical_teleop
 
 
 def test_physical_dataset_schema_contains_only_arm_and_camera(monkeypatch, tmp_path) -> None:
@@ -29,7 +30,7 @@ def test_physical_dataset_schema_contains_only_arm_and_camera(monkeypatch, tmp_p
     )
 
     assert result is sentinel
-    assert captured["robot_type"] == "hepha_physical_feetech"
+    assert captured["robot_type"] == "bimanual_physical_feetech"
     assert captured["features"]["action"]["names"] == [
         "shoulder_r.pos",
         "finger_l.pos",

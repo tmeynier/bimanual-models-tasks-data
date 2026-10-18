@@ -1,0 +1,27 @@
+<mujoco model="task-01-basic-object-placement">
+  <include file="../../backends/mujoco/assets/robot.xml"/>
+  <worldbody>
+    <body name="cube" pos="0.20 0.05 0.035">
+      <freejoint name="cube_free"/>
+      <geom name="cube_collision" type="box" size="0.015 0.015 0.015" density="250" friction="1.4 0.05 0.002" contype="1" conaffinity="1" group="0" rgba="0.15 0.45 1 0.3"/>
+      <geom name="cube_visual" type="box" size="0.015 0.015 0.015" mass="0" contype="0" conaffinity="0" group="1" rgba="0.10 0.35 1 1"/>
+      <geom name="task_ik_marker_source_origin" type="sphere" size="0.006" mass="0" rgba="1 0.85 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_source_x" type="capsule" fromto="0 0 0 0.05 0 0" size="0.002" mass="0" rgba="1 0 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_source_y" type="capsule" fromto="0 0 0 0 0.05 0" size="0.002" mass="0" rgba="0 1 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_source_z" type="capsule" fromto="0 0 0 0 0 0.05" size="0.002" mass="0" rgba="0.1 0.25 1 1" contype="0" conaffinity="0" group="3"/>
+    </body>
+    <body name="target_container" pos="0.06 0.15 0" mocap="true">
+      <geom name="target_bottom" type="box" pos="0 0 0.0275" size="0.035 0.035 0.0025" contype="1" conaffinity="1" group="1" rgba="0.95 0.65 0.12 1"/>
+      <geom name="target_wall_xp" type="box" pos="0.0325 0 0.0425" size="0.0025 0.035 0.0175" contype="1" conaffinity="1" group="1" rgba="0.95 0.65 0.12 1"/>
+      <geom name="target_wall_xn" type="box" pos="-0.0325 0 0.0425" size="0.0025 0.035 0.0175" contype="1" conaffinity="1" group="1" rgba="0.95 0.65 0.12 1"/>
+      <geom name="target_wall_yp" type="box" pos="0 0.0325 0.0425" size="0.03 0.0025 0.0175" contype="1" conaffinity="1" group="1" rgba="0.95 0.65 0.12 1"/>
+      <geom name="target_wall_yn" type="box" pos="0 -0.0325 0.0425" size="0.03 0.0025 0.0175" contype="1" conaffinity="1" group="1" rgba="0.95 0.65 0.12 1"/>
+    </body>
+    <body name="target_ik_frame" pos="0.06 0.15 0.10" mocap="true">
+      <geom name="task_ik_marker_target_origin" type="sphere" size="0.006" rgba="1 1 1 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_target_x" type="capsule" fromto="0 0 0 0.05 0 0" size="0.002" rgba="1 0 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_target_y" type="capsule" fromto="0 0 0 0 0.05 0" size="0.002" rgba="0 1 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_target_z" type="capsule" fromto="0 0 0 0 0 0.05" size="0.002" rgba="0.1 0.25 1 1" contype="0" conaffinity="0" group="3"/>
+    </body>
+  </worldbody>
+</mujoco>

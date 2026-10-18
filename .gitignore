@@ -1,6 +1,10 @@
 # macOS
 .DS_Store
 
+# CAD editor backups and generated assembly previews
+*.FCBak
+cad/assembly/*.stl
+
 # Python
 .venv/
 __pycache__/
@@ -8,6 +12,12 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+.camera-tools/
+
+# Temporary camera tuning output
+camera_*_sample.png
+camera_*_tuned.png
+camera_*_settings.json
 
 # Generated experiment data
 datasets/
@@ -17,9 +27,8 @@ outputs/
 wandb/
 
 # Model weights and checkpoints
+models/
 *.safetensors
 *.pt
 *.pth
 *.ckpt
-models/**/checkpoints/
-models/**/.cache/

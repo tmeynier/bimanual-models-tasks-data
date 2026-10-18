@@ -8,7 +8,7 @@ from typing import Any
 
 from .base import SimulationBackend, SimulationConfig
 
-ENTRY_POINT_GROUP = "hepha.simulation_backends"
+ENTRY_POINT_GROUP = "bimanual.simulation_backends"
 BUILTIN_BACKENDS = {
     "mujoco": "simulation.backends.mujoco.backend:MujocoBackend",
 }

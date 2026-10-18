@@ -1,10 +1,13 @@
-# Simulation backends
+# Simulation
 
-`simulation.base.SimulationBackend` is the stable boundary between Hepha,
-LeRobot, and a simulator. Built-in backends are registered lazily, so MuJoCo is
-not imported when selecting another environment.
+`simulation.base.SimulationBackend` is the task-neutral boundary used by the
+LeRobot adapter. `simulation.backends.mujoco.MujocoBackend` implements the
+current robot-only environment: 12 actuators, the floor, collision geometry,
+and four fixed robot cameras.
 
-Third-party or future Isaac Sim backends can register a `SimulationBackend`
-subclass with the `hepha.simulation_backends` entry-point group. Backend-specific
-recording controllers use `hepha.demonstration_controllers` and the entry-point
-name `<backend>.<controller>`.
+Task objects and behaviors do not belong in the base backend. The seven paper
+tasks are organized under `simulation/tasks/`, with one description and one IK
+entry point per task. Run `bimanual-tasks` to inspect their current status.
+
+External backends can register through the `bimanual.simulation_backends`
+entry-point group and must implement `SimulationBackend`.

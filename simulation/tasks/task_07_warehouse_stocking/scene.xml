@@ -1,0 +1,177 @@
+<mujoco model="task-07-warehouse-stocking">
+  <include file="../../backends/mujoco/assets/robot.xml"/>
+  <asset>
+    <mesh name="task4_rack" file="assets/rack_structure_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_1" file="assets/drawer_1_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_2" file="assets/drawer_2_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_3" file="assets/drawer_3_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_4" file="assets/drawer_4_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_5" file="assets/drawer_5_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_6" file="assets/drawer_6_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_7" file="assets/drawer_7_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_8" file="assets/drawer_8_link.stl" scale="0.001 0.001 0.001"/>
+    <mesh name="task4_drawer_9" file="assets/drawer_9_link.stl" scale="0.001 0.001 0.001"/>
+  </asset>
+  <default>
+    <default class="task4_handle_collision">
+      <geom contype="1" conaffinity="1" condim="4" friction="1.8 0.08 0.003"/>
+    </default>
+    <default class="task7_drawer_collision">
+      <geom contype="2" conaffinity="0" condim="4" friction="1.4 0.05 0.002"/>
+    </default>
+  </default>
+  <worldbody>
+    <!-- Task-local copy of the source 3 x 3 drawer stack. -->
+    <body name="drawer_stack" pos="-0.015802 0.2541761 0.010032">
+      <geom name="drawer_stack_visual" type="mesh" mesh="task4_rack" mass="0" rgba="0.45 0.75 1 1" group="1" contype="0" conaffinity="0"/>
+      <geom name="drawer_stack_shelf_top" type="box" pos="0.0079426 -0.3585761 0.30793" size="0.15 0.055 0.00202" group="0"/>
+      <geom name="drawer_stack_shelf_upper_middle" type="box" pos="0.0079426 -0.3585761 0.24257" size="0.15 0.055 0.00202" group="0"/>
+      <geom name="drawer_stack_shelf_lower_middle" type="box" pos="0.0079426 -0.3585761 0.17721" size="0.15 0.055 0.00202" group="0"/>
+      <geom name="drawer_stack_shelf_bottom" type="box" pos="0.0079426 -0.3585761 0.11185" size="0.15 0.055 0.00202" group="0"/>
+      <geom name="drawer_stack_divider_left_inner" type="box" pos="-0.0413774 -0.3585761 0.20983" size="0.002 0.055 0.1" group="0"/>
+      <geom name="drawer_stack_divider_right_inner" type="box" pos="0.0572626 -0.3585761 0.20983" size="0.002 0.055 0.1" group="0"/>
+      <geom name="drawer_stack_side_left" type="box" pos="-0.1400574 -0.3585761 0.20983" size="0.002 0.055 0.1" group="0"/>
+      <geom name="drawer_stack_side_right" type="box" pos="0.1559426 -0.3585761 0.20983" size="0.002 0.055 0.1" group="0"/>
+    </body>
+
+    <!-- Numbering follows the source assembly: rows top-to-bottom, columns right-to-left. -->
+    <body name="drawer_1" pos="-0.0052153 0.2520768 0.0111032" childclass="task7_drawer_collision">
+      <joint name="drawer_1_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_1_bottom" type="box" pos="0.0960159 -0.3564768 0.2475188" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_1_front" type="box" pos="0.0960159 -0.3070768 0.2755188" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_1_back" type="box" pos="0.0960159 -0.4088768 0.2755188" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_1_side_xp" type="box" pos="0.1408159 -0.3594768 0.2755188" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_1_side_xn" type="box" pos="0.0512159 -0.3594768 0.2755188" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_1_handle" class="task4_handle_collision" type="box" pos="0.0960159 -0.2870768 0.2755188" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_1_visual" type="mesh" mesh="task4_drawer_1" mass="0" rgba="0.96 0.72 0.12 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_2" pos="-0.0002611 0.2516768 0.0109676" childclass="task7_drawer_collision">
+      <joint name="drawer_2_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_2_bottom" type="box" pos="-0.0075983 -0.3560768 0.2476544" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_2_front" type="box" pos="-0.0075983 -0.3066768 0.2756544" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_2_back" type="box" pos="-0.0075983 -0.4084768 0.2756544" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_2_side_xp" type="box" pos="0.0372017 -0.3590768 0.2756544" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_2_side_xn" type="box" pos="-0.0523983 -0.3590768 0.2756544" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_2_handle" class="task4_handle_collision" type="box" pos="-0.0075983 -0.2866768 0.2756544" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_2_visual" type="mesh" mesh="task4_drawer_2" mass="0" rgba="0.95 0.50 0.10 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_3" pos="0.0046043 0.2580768 0.0111448" childclass="task7_drawer_collision">
+      <joint name="drawer_3_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_3_bottom" type="box" pos="-0.1111237 -0.3624768 0.2474772" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_3_front" type="box" pos="-0.1111237 -0.3130768 0.2754772" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_3_back" type="box" pos="-0.1111237 -0.4148768 0.2754772" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_3_side_xp" type="box" pos="-0.0663237 -0.3654768 0.2754772" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_3_side_xn" type="box" pos="-0.1559237 -0.3654768 0.2754772" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_3_handle" class="task4_handle_collision" type="box" pos="-0.1111237 -0.2930768 0.2754772" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_3_visual" type="mesh" mesh="task4_drawer_3" mass="0" rgba="0.75 0.82 0.12 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_4" pos="-0.0052322 0.2560768 0.0144846" childclass="task7_drawer_collision">
+      <joint name="drawer_4_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_4_bottom" type="box" pos="0.0960329 -0.3604768 0.1787774" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_4_front" type="box" pos="0.0960329 -0.3110768 0.2067774" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_4_back" type="box" pos="0.0960329 -0.4128768 0.2067774" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_4_side_xp" type="box" pos="0.1408329 -0.3634768 0.2067774" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_4_side_xn" type="box" pos="0.0512329 -0.3634768 0.2067774" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_4_handle" class="task4_handle_collision" type="box" pos="0.0960329 -0.2910768 0.2067774" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_4_visual" type="mesh" mesh="task4_drawer_4" mass="0" rgba="0.38 0.78 0.18 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_5" pos="-0.0003028 0.2576768 0.0143738" childclass="task7_drawer_collision">
+      <joint name="drawer_5_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_5_bottom" type="box" pos="-0.0075566 -0.3620768 0.1788882" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_5_front" type="box" pos="-0.0075566 -0.3126768 0.2068882" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_5_back" type="box" pos="-0.0075566 -0.4144768 0.2068882" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_5_side_xp" type="box" pos="0.0372434 -0.3650768 0.2068882" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_5_side_xn" type="box" pos="-0.0523566 -0.3650768 0.2068882" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_5_handle" class="task4_handle_collision" type="box" pos="-0.0075566 -0.2926768 0.2068882" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_5_visual" type="mesh" mesh="task4_drawer_5" mass="0" rgba="0.10 0.72 0.42 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_6" pos="0.0044816 0.2580768 0.0143633" childclass="task7_drawer_collision">
+      <joint name="drawer_6_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_6_bottom" type="box" pos="-0.1110010 -0.3624768 0.1788987" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_6_front" type="box" pos="-0.1110010 -0.3130768 0.2068987" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_6_back" type="box" pos="-0.1110010 -0.4148768 0.2068987" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_6_side_xp" type="box" pos="-0.0662010 -0.3654768 0.2068987" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_6_side_xn" type="box" pos="-0.1558010 -0.3654768 0.2068987" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_6_handle" class="task4_handle_collision" type="box" pos="-0.1110010 -0.2930768 0.2068987" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_6_visual" type="mesh" mesh="task4_drawer_6" mass="0" rgba="0.08 0.62 0.82 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_7" pos="-0.0052908 0.2560768 0.0179570" childclass="task7_drawer_collision">
+      <joint name="drawer_7_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_7_bottom" type="box" pos="0.0960914 -0.3604768 0.1099450" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_7_front" type="box" pos="0.0960914 -0.3110768 0.1379450" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_7_back" type="box" pos="0.0960914 -0.4128768 0.1379450" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_7_side_xp" type="box" pos="0.1408914 -0.3634768 0.1379450" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_7_side_xn" type="box" pos="0.0512914 -0.3634768 0.1379450" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_7_handle" class="task4_handle_collision" type="box" pos="0.0960914 -0.2910768 0.1379450" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_7_visual" type="mesh" mesh="task4_drawer_7" mass="0" rgba="0.25 0.45 0.96 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_8" pos="-0.0002282 0.2580768 0.0179148" childclass="task7_drawer_collision">
+      <joint name="drawer_8_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_8_bottom" type="box" pos="-0.0076311 -0.3624768 0.1099871" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_8_front" type="box" pos="-0.0076311 -0.3130768 0.1379871" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_8_back" type="box" pos="-0.0076311 -0.4148768 0.1379871" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_8_side_xp" type="box" pos="0.0371689 -0.3654768 0.1379871" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_8_side_xn" type="box" pos="-0.0524311 -0.3654768 0.1379871" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_8_handle" class="task4_handle_collision" type="box" pos="-0.0076311 -0.2930768 0.1379871" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_8_visual" type="mesh" mesh="task4_drawer_8" mass="0" rgba="0.62 0.28 0.94 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_9" pos="0.0050711 0.2550768 0.0179387" childclass="task7_drawer_collision">
+      <joint name="drawer_9_slide" type="slide" axis="0 1 0" range="-0.01 0.08" damping="0.5" frictionloss="0.05" armature="0.01"/>
+      <geom name="drawer_9_bottom" type="box" pos="-0.1115905 -0.3594768 0.1099633" size="0.0468 0.0544 0.002" group="0"/>
+      <geom name="drawer_9_front" type="box" pos="-0.1115905 -0.3100768 0.1379633" size="0.0468 0.005 0.03" group="0"/>
+      <geom name="drawer_9_back" type="box" pos="-0.1115905 -0.4118768 0.1379633" size="0.0468 0.002 0.03" group="0"/>
+      <geom name="drawer_9_side_xp" type="box" pos="-0.0667905 -0.3624768 0.1379633" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_9_side_xn" type="box" pos="-0.1563905 -0.3624768 0.1379633" size="0.002 0.0474 0.03" group="0"/>
+      <geom name="drawer_9_handle" class="task4_handle_collision" type="box" pos="-0.1115905 -0.2900768 0.1379633" size="0.04 0.001 0.004" group="0"/>
+      <geom name="drawer_9_visual" type="mesh" mesh="task4_drawer_9" mass="0" rgba="0.94 0.28 0.52 1" group="1" contype="0" conaffinity="0"/>
+    </body>
+    <body name="drawer_handle_target_frame" pos="0 -0.035 0.2" mocap="true">
+      <geom name="task_ik_marker_drawer_target_origin" type="sphere" size="0.006" mass="0" rgba="1 1 1 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_drawer_target_x" type="capsule" fromto="0 0 0 0.05 0 0" size="0.002" mass="0" rgba="1 0 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_drawer_target_y" type="capsule" fromto="0 0 0 0 0.05 0" size="0.002" mass="0" rgba="0 1 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_drawer_target_z" type="capsule" fromto="0 0 0 0 0 0.05" size="0.002" mass="0" rgba="0.1 0.25 1 1" contype="0" conaffinity="0" group="3"/>
+    </body>
+
+    <body name="blue_cube" pos="-0.10 0.12 0.035">
+      <freejoint name="blue_cube_free"/>
+      <geom name="blue_cube_collision" type="box" size="0.015 0.015 0.015" density="250" friction="1.4 0.05 0.002" contype="1" conaffinity="3" group="0" rgba="0.15 0.45 1 0.3"/>
+      <geom name="blue_cube_visual" type="box" size="0.015 0.015 0.015" mass="0" contype="0" conaffinity="0" group="1" rgba="0.10 0.35 1 1"/>
+      <geom name="task_ik_marker_blue_source_origin" type="sphere" size="0.006" mass="0" rgba="1 0.85 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_blue_source_x" type="capsule" fromto="0 0 0 0.05 0 0" size="0.002" mass="0" rgba="1 0 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_blue_source_y" type="capsule" fromto="0 0 0 0 0.05 0" size="0.002" mass="0" rgba="0 1 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_blue_source_z" type="capsule" fromto="0 0 0 0 0 0.05" size="0.002" mass="0" rgba="0.1 0.25 1 1" contype="0" conaffinity="0" group="3"/>
+    </body>
+
+    <body name="green_cube" pos="0.10 0.12 0.035">
+      <freejoint name="green_cube_free"/>
+      <geom name="green_cube_collision" type="box" size="0.015 0.015 0.015" density="250" friction="1.4 0.05 0.002" contype="1" conaffinity="3" group="0" rgba="0.12 0.75 0.28 0.3"/>
+      <geom name="green_cube_visual" type="box" size="0.015 0.015 0.015" mass="0" contype="0" conaffinity="0" group="1" rgba="0.08 0.62 0.20 1"/>
+      <geom name="task_ik_marker_green_source_origin" type="sphere" size="0.006" mass="0" rgba="1 0.85 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_green_source_x" type="capsule" fromto="0 0 0 0.05 0 0" size="0.002" mass="0" rgba="1 0 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_green_source_y" type="capsule" fromto="0 0 0 0 0.05 0" size="0.002" mass="0" rgba="0 1 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_green_source_z" type="capsule" fromto="0 0 0 0 0 0.05" size="0.002" mass="0" rgba="0.1 0.25 1 1" contype="0" conaffinity="0" group="3"/>
+    </body>
+
+    <body name="stocking_target_frame" pos="0 0 0.2" mocap="true">
+      <geom name="task_ik_marker_stocking_target_origin" type="sphere" size="0.006" mass="0" rgba="1 1 1 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_stocking_target_x" type="capsule" fromto="0 0 0 0.05 0 0" size="0.002" mass="0" rgba="1 0 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_stocking_target_y" type="capsule" fromto="0 0 0 0 0.05 0" size="0.002" mass="0" rgba="0 1 0 1" contype="0" conaffinity="0" group="3"/>
+      <geom name="task_ik_marker_stocking_target_z" type="capsule" fromto="0 0 0 0 0 0.05" size="0.002" mass="0" rgba="0.1 0.25 1 1" contype="0" conaffinity="0" group="3"/>
+    </body>
+  </worldbody>
+  <equality>
+    <connect name="drawer_handle_attach_l" body1="drawer_1" body2="hand_l_link" anchor="0 0 0" active="false" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+    <connect name="drawer_handle_attach_r" body1="drawer_1" body2="hand_r_link" anchor="0 0 0" active="false" solref="0.01 1" solimp="0.95 0.99 0.001"/>
+  </equality>
+  <contact>
+    <exclude body1="drawer_stack" body2="drawer_1"/>
+    <exclude body1="drawer_stack" body2="drawer_2"/>
+    <exclude body1="drawer_stack" body2="drawer_3"/>
+    <exclude body1="drawer_stack" body2="drawer_4"/>
+    <exclude body1="drawer_stack" body2="drawer_5"/>
+    <exclude body1="drawer_stack" body2="drawer_6"/>
+    <exclude body1="drawer_stack" body2="drawer_7"/>
+    <exclude body1="drawer_stack" body2="drawer_8"/>
+    <exclude body1="drawer_stack" body2="drawer_9"/>
+  </contact>
+</mujoco>

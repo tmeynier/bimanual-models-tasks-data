@@ -1,4 +1,4 @@
-"""Backend-neutral contracts for Hepha simulation environments."""
+"""Backend-neutral contracts for bimanual robot simulation environments."""
 
 from __future__ import annotations
 

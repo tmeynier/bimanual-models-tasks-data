@@ -6,7 +6,8 @@ from typing import ClassVar
 
 import pytest
 import torch
-from hepha_lerobot.evaluation import offline_loss
+
+from bimanual_robot.evaluation import offline_loss
 
 
 class _EvalDataset:
@@ -42,7 +43,7 @@ def test_eval_loss_matches_lerobot_batch_mean_aggregation(
     cfg = SimpleNamespace(
         dataset=SimpleNamespace(
             root=dataset_root,
-            repo_id="hepha/test",
+            repo_id="bimanual/test",
             eval_split=0.1,
         ),
         policy=None,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Calibrate one complete Hepha arm by recording a simultaneous range sweep."""
+"""Calibrate the complete bimanual robot by recording a simultaneous range sweep."""
 
 from __future__ import annotations
 
@@ -130,7 +130,7 @@ def resolve_complete_bus(
     baudrate: int,
     retries: int,
 ) -> tuple[str, int]:
-    """Use a known port directly or discover exactly one complete Hepha bus."""
+    """Use a known port directly or discover exactly one complete bimanual robot bus."""
 
     if port:
         return port, baudrate
@@ -140,7 +140,7 @@ def resolve_complete_bus(
     unexpected = sorted(set(detected_ids) - set(ALL_SERVO_IDS))
     if missing or unexpected:
         raise RuntimeError(
-            "Calibration requires exactly Hepha servo IDs 1-12; "
+            "Calibration requires exactly the bimanual robot servo IDs 1-12; "
             f"missing={missing}, unexpected={unexpected}."
         )
     return discovered_port, discovered_baudrate
@@ -357,7 +357,7 @@ def run(role: Role, argv: list[str] | None = None) -> int:
             retries=args.retries,
         )
         names = [f"servo_{motor_id}" for motor_id in ALL_SERVO_IDS]
-        print(f"Hepha {role} simultaneous range calibration")
+        print(f"Bimanual robot {role} simultaneous range calibration")
         print(f"Port: {port}   Baud: {baudrate:,}   IDs: 1-12")
         print("Support both arms: torque on all 12 servos is being disabled.")
         bus.disable_torque(names, num_retry=args.retries)

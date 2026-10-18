@@ -14,7 +14,6 @@ This file is a placeholder for links used in the main document.
 ## Models And Papers
 
 - TODO: ACT
-- TODO: Diffusion Policy
 - TODO: VLA
 - TODO: JEPA
 - TODO: World models
